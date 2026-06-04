@@ -33,9 +33,9 @@ Que al verla, el cliente diga "esto lo quiero". Tiene que verse **cara, discreta
 ## Comandos
 
 ```bash
-npm run dev      # desarrollo
-npm run build    # build de producción (debe pasar sin errores ni warnings de tipos)
-npm run lint     # lint
+pnpm dev     # desarrollo
+pnpm build   # build de producción (debe pasar sin errores ni warnings de tipos)
+pnpm lint    # lint
 ```
 
 ## Reglas críticas (no negociables)

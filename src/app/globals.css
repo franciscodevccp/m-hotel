@@ -1,26 +1,209 @@
 @import "tailwindcss";
 
+/* ----------------------------------------------------------------------------
+   Tokens de marca M Motel. Oscuro cálido + dorado champagne, acento vino.
+   Ver design.md. Los valores crudos viven en :root; @theme inline los expone
+   como utilidades de Tailwind (bg-surface, text-gold, font-display, etc.).
+---------------------------------------------------------------------------- */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Fondos en capas */
+  --bg: #0b0a0c;
+  --surface: #16141a;
+  --surface-2: #211c26;
+
+  /* Líneas: hairlines translúcidas, nunca grises sólidos */
+  --line: rgba(244, 241, 236, 0.08);
+  --line-strong: rgba(244, 241, 236, 0.16);
+
+  /* Texto: blanco cálido, nunca #fff puro */
+  --text: #f4f1ec;
+  --text-muted: #a79f97;
+  --text-dim: #6f685f;
+
+  /* Acento primario: dorado champagne */
+  --gold: #c9a24a;
+  --gold-soft: #e4c77e;
+
+  /* Acento sensual secundario (uso mínimo) */
+  --wine: #7a2233;
+
+  /* Estados apagados y elegantes */
+  --ok: #7c9a6b;
+  --busy: #b25a4e;
+  --clean: #c9a24a;
+  --maint: #8a837d;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-cream: var(--text);
+  --color-muted: var(--text-muted);
+  --color-dim: var(--text-dim);
+
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --color-wine: var(--wine);
+
+  --color-ok: var(--ok);
+  --color-busy: var(--busy);
+  --color-clean: var(--clean);
+  --color-maint: var(--maint);
+
+  /* Fuentes inyectadas por next/font (ver layout.tsx) */
+  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-hanken);
+
+  /* Radios pequeños: nada de rounded-2xl por todos lados */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ----------------------------------------------------------------------------
+   Base
+---------------------------------------------------------------------------- */
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--line);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    font-optical-sizing: auto;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--gold) 28%, transparent);
+    color: var(--text);
+  }
+
+  /* Foco visible: anillo dorado fino, jamás eliminado */
+  :focus-visible {
+    outline: 1px solid color-mix(in srgb, var(--gold) 70%, transparent);
+    outline-offset: 2px;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ----------------------------------------------------------------------------
+   Clases de marca (en @layer components, para que las utilidades las puedan
+   sobreescribir cuando se combinen, p. ej. `kicker text-dim`).
+---------------------------------------------------------------------------- */
+
+@layer components {
+  /* Kicker / label en small caps espaciadas: clave del look editorial */
+  .kicker {
+    font-family: var(--font-sans), sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 0.72rem;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--text-muted);
+  }
+
+  /* Grano de película global: ruido SVG a baja opacidad sobre todo el sitio */
+  .grain {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    pointer-events: none;
+    opacity: 0.05;
+    mix-blend-mode: soft-light;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Viñeta radial oscura para los bordes de imágenes/hero */
+  .vignette {
+    background: radial-gradient(
+      120% 100% at 50% 35%,
+      transparent 40%,
+      rgba(11, 10, 12, 0.55) 100%
+    );
+  }
+
+  /* Glow cálido muy tenue detrás de titulares clave */
+  .gold-glow {
+    background: radial-gradient(
+      50% 60% at 50% 40%,
+      color-mix(in srgb, var(--gold-soft) 8%, transparent) 0%,
+      transparent 70%
+    );
+  }
+
+  /* Degradado oscuro de abajo→arriba para legibilidad sobre fotos */
+  .scrim-bottom {
+    background: linear-gradient(
+      to top,
+      var(--bg) 0%,
+      rgba(11, 10, 12, 0.75) 28%,
+      rgba(11, 10, 12, 0.25) 60%,
+      transparent 100%
+    );
+  }
+
+  /* Reveal de entrada para usos sin JS */
+  .rise {
+    animation: rise 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Reveal al entrar en viewport (ver components/ui/Reveal.tsx) */
+  .reveal {
+    opacity: 0;
+    transform: translateY(16px);
+    transition:
+      opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: opacity, transform;
+  }
+  .reveal-show {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer utilities {
+  /* Números alineados en precios y tablas */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Decisión de la demo: las animaciones de entrada (hero y reveals) se fuerzan
+   siempre, por eso no se neutralizan bajo prefers-reduced-motion. Solo se desactiva
+   el scroll suave, que es molesto con movimiento reducido. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }

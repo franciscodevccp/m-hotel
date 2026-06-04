@@ -1,0 +1,66 @@
+import { getCategory, priceFor } from "@/lib/pricing";
+import type { CategoryId, DayType, Duration, Reservation } from "@/types";
+
+function total(categoryId: CategoryId, dayType: DayType, duration: Duration): number {
+  return priceFor(getCategory(categoryId), dayType, duration);
+}
+
+// Reservas precargadas para poblar el panel admin. A esta lista se suman, en el
+// cliente, las reservas que llegan del flujo público.
+export const SEED_RESERVATIONS: Reservation[] = [
+  {
+    id: "r-1042",
+    categoryId: "black",
+    dayType: "weekend",
+    duration: 6,
+    guestName: "Camila R.",
+    guestPhone: "+56 9 8123 4567",
+    total: total("black", "weekend", 6),
+    createdAt: "2026-06-04T20:15:00",
+    status: "confirmed",
+  },
+  {
+    id: "r-1041",
+    categoryId: "vip-jacuzzi",
+    dayType: "weekday",
+    duration: 3,
+    guestName: "Joaquín M.",
+    guestPhone: "+56 9 7654 3210",
+    total: total("vip-jacuzzi", "weekday", 3),
+    createdAt: "2026-06-04T19:40:00",
+    status: "confirmed",
+  },
+  {
+    id: "r-1040",
+    categoryId: "jacuzzi-premium",
+    dayType: "weekday",
+    duration: 12,
+    guestName: "Daniela P.",
+    guestPhone: "+56 9 6011 2233",
+    total: total("jacuzzi-premium", "weekday", 12),
+    createdAt: "2026-06-04T18:05:00",
+    status: "pending",
+  },
+  {
+    id: "r-1039",
+    categoryId: "standard",
+    dayType: "weekday",
+    duration: 6,
+    guestName: "Tomás V.",
+    guestPhone: "+56 9 5544 8899",
+    total: total("standard", "weekday", 6),
+    createdAt: "2026-06-04T16:30:00",
+    status: "confirmed",
+  },
+  {
+    id: "r-1038",
+    categoryId: "vip-jacuzzi",
+    dayType: "weekend",
+    duration: 6,
+    guestName: "Francisca A.",
+    guestPhone: "+56 9 4400 1212",
+    total: total("vip-jacuzzi", "weekend", 6),
+    createdAt: "2026-06-03T23:10:00",
+    status: "confirmed",
+  },
+];
