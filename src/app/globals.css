@@ -27,6 +27,7 @@
 
   /* Acento sensual secundario (uso mínimo) */
   --wine: #7a2233;
+  --wine-soft: #c77685;
 
   /* Estados apagados y elegantes */
   --ok: #7c9a6b;
@@ -50,6 +51,7 @@
   --color-gold: var(--gold);
   --color-gold-soft: var(--gold-soft);
   --color-wine: var(--wine);
+  --color-wine-soft: var(--wine-soft);
 
   --color-ok: var(--ok);
   --color-busy: var(--busy);
@@ -58,7 +60,7 @@
 
   /* Fuentes inyectadas por next/font (ver layout.tsx) */
   --font-display: var(--font-fraunces);
-  --font-sans: var(--font-hanken);
+  --font-sans: var(--font-instrument);
 
   /* Radios pequeños: nada de rounded-2xl por todos lados */
   --radius-xs: 2px;
@@ -102,6 +104,42 @@
     outline: 1px solid color-mix(in srgb, var(--gold) 70%, transparent);
     outline-offset: 2px;
   }
+}
+
+/* ----------------------------------------------------------------------------
+   Scrollbars de marca: finas, cálidas y discretas. Reemplazan el scrollbar gris
+   del sistema para que combine con el tema oscuro. El thumb se insinúa y se torna
+   dorado al pasar el cursor; la pista queda transparente.
+---------------------------------------------------------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 16%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--text) 14%, transparent);
+  border-radius: 999px;
+  /* El borde transparente + background-clip adelgaza el thumb y lo deja con aire. */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--gold) 50%, transparent);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* ----------------------------------------------------------------------------

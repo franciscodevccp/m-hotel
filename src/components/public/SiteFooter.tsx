@@ -25,7 +25,7 @@ export function SiteFooter() {
               {SITE.city}, {SITE.region}
             </p>
             <a
-              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(SITE.mapsQuery)}`}
+              href={SITE.mapsUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-sm text-gold transition-colors hover:text-gold-soft"

@@ -67,22 +67,22 @@ Reglas de color:
 Cargar con `next/font/google`. Emparejar un serif editorial con un grotesk refinado.
 
 - **Display (titulares):** `Fraunces` — serif editorial de alto contraste, con carácter. Usar pesos 300–600, ejes opsz altos para los titulares grandes. Es el alma de la marca.
-- **Texto / UI:** `Hanken Grotesk` — sans humanista, limpia y cálida. Pesos 400–600.
-- **Cifras (precios, horas):** misma `Hanken Grotesk` con `font-variant-numeric: tabular-nums` para que los precios queden alineados. (Opcional: un mono discreto tipo `Geist Mono` solo para los chips de precio si se quiere un toque más "preciso"; si se usa, con moderación.)
+- **Texto / UI:** `Instrument Sans` — grotesk humanista, definida y sobria, con buen carácter en tamaños chicos. Pesos 400–600.
+- **Cifras (precios, horas):** misma `Instrument Sans` con `font-variant-numeric: tabular-nums` para que los precios queden alineados. (Opcional: un mono discreto tipo `Geist Mono` solo para los chips de precio si se quiere un toque más "preciso"; si se usa, con moderación.)
 
 ```ts
 // src/app/layout.tsx
-import { Fraunces, Hanken_Grotesk } from "next/font/google";
+import { Fraunces, Instrument_Sans } from "next/font/google";
 
-const fraunces = Fraunces({ subsets: ["latin"], variable: "--font-display", display: "swap" });
-const hanken   = Hanken_Grotesk({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
+const fraunces   = Fraunces({ subsets: ["latin"], variable: "--font-display", display: "swap" });
+const instrument = Instrument_Sans({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 ```
 
 Jerarquía (ejemplo, ajustable):
 - Display XL (hero): Fraunces, `clamp(3rem, 8vw, 6.5rem)`, peso 300–400, `letter-spacing: -0.02em`, `line-height: 0.95`.
 - H2 sección: Fraunces, `clamp(1.8rem, 4vw, 3rem)`.
 - Labels / kicker: Hanken, mayúsculas, `0.75rem`, `letter-spacing: 0.22em`, color `--text-muted`. (Las "small caps espaciadas" son clave del look editorial.)
-- Cuerpo: Hanken, `1rem–1.125rem`, `line-height: 1.6`, color `--text-muted` para párrafos largos y `--text` para lo importante.
+- Cuerpo: Instrument Sans, `1rem–1.125rem`, `line-height: 1.6`, color `--text-muted` para párrafos largos y `--text` para lo importante.
 
 **Prohibido**: Inter, Roboto, Arial, Helvetica, fuentes del sistema, y **Space Grotesk** (clichés de IA). No uses una sola fuente para todo.
 

@@ -1,3 +1,4 @@
+import { ReceptionTurnBar } from "@/components/admin/ReceptionTurnBar";
 import { RoomBoard } from "@/components/admin/RoomBoard";
 
 export default function HabitacionesPage() {
@@ -7,9 +8,11 @@ export default function HabitacionesPage() {
         <span className="kicker text-gold">Operación</span>
         <h1 className="mt-3 font-display text-3xl text-cream sm:text-4xl">Habitaciones</h1>
         <p className="mt-2 text-sm text-muted">
-          Tablero en tiempo real de las 20 habitaciones. Toca una para cambiar su estado.
+          Tablero en vivo de las 20 habitaciones. Toca una para hacer check-in, check-out, cambiarla
+          de pieza o gestionar su estado.
         </p>
       </div>
+      <ReceptionTurnBar />
       <RoomBoard />
     </div>
   );

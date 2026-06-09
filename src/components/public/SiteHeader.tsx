@@ -6,9 +6,12 @@ import { buttonStyles } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 
 const NAV = [
+  { href: "/", label: "Inicio" },
   { href: "/#categorias", label: "Categorías" },
   { href: "/#servicios", label: "Servicios" },
   { href: "/#experiencia", label: "Experiencia" },
+  { href: "/carta", label: "Carta" },
+  { href: "/sexshop", label: "Sexshop" },
 ];
 
 export function SiteHeader() {
@@ -38,10 +41,10 @@ export function SiteHeader() {
       )}
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:h-20 sm:px-8">
-        <Link href="/" className="flex items-baseline gap-2" onClick={() => setOpen(false)}>
+        <div className="flex select-none items-baseline gap-2">
           <span className="font-display text-2xl leading-none tracking-tight text-cream">M</span>
           <span className="kicker hidden text-dim sm:inline">Motel</span>
-        </Link>
+        </div>
 
         <nav className="hidden items-center gap-8 md:flex">
           {NAV.map((link) => (

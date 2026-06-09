@@ -1,11 +1,14 @@
-import { DAY_LABELS, DURATION_LABELS, formatCLP, formatTime } from "@/lib/format";
+import { DAY_LABELS, DURATION_LABELS, formatCLP, formatTime12 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Category, DayType, Duration } from "@/types";
 
 interface SummaryPanelProps {
   category: Category | null;
+  dateLabel?: string;
+  roomLabel?: string;
   dayType: DayType;
   duration: Duration | null;
+  arrivalLabel?: string;
   total: number | null;
   endTime: Date | null;
   className?: string;
@@ -21,22 +24,35 @@ function Row({ label, value, muted }: { label: string; value: string; muted?: bo
 }
 
 /** Resumen sticky de la reserva, visible durante todo el flujo. */
-export function SummaryPanel({ category, dayType, duration, total, endTime, className }: SummaryPanelProps) {
+export function SummaryPanel({
+  category,
+  dateLabel,
+  roomLabel,
+  dayType,
+  duration,
+  arrivalLabel,
+  total,
+  endTime,
+  className,
+}: SummaryPanelProps) {
   return (
     <aside className={cn("border border-line bg-surface/60 p-6", className)}>
       <span className="kicker text-gold">Tu reserva</span>
 
       <dl className="mt-5 space-y-4">
+        <Row label="Fecha" value={dateLabel ?? "Por elegir"} muted={!dateLabel} />
         <Row label="Categoría" value={category ? category.name : "Por elegir"} muted={!category} />
-        <Row label="Día" value={DAY_LABELS[dayType]} />
+        <Row label="Habitación" value={roomLabel ?? "Por elegir"} muted={!roomLabel} />
+        <Row label="Día" value={dateLabel ? DAY_LABELS[dayType] : "—"} muted={!dateLabel} />
         <Row
           label="Bloque"
           value={duration ? DURATION_LABELS[duration] : "Por elegir"}
           muted={!duration}
         />
+        <Row label="Llegada" value={arrivalLabel ?? "Por elegir"} muted={!arrivalLabel} />
         <Row
           label="Término estimado"
-          value={endTime && duration ? formatTime(endTime) : "—"}
+          value={endTime && duration ? formatTime12(endTime) : "—"}
           muted={!duration}
         />
       </dl>

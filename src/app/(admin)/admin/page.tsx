@@ -3,8 +3,10 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ROOM_STATUS, ROOM_STATUS_ORDER } from "@/components/admin/roomStatus";
+import { ingresosTotales, totalDiff } from "@/lib/cash";
 import { DURATION_LABELS, formatCLP } from "@/lib/format";
 import { getCategory } from "@/lib/pricing";
+import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -32,10 +34,11 @@ function StatCard({
 
 export default function DashboardPage() {
   const { rooms, reservations, shift, transactions, resetDemo } = useAppStore();
+  const { user } = useSession();
 
   const occupied = rooms.filter((r) => r.status === "occupied").length;
   const occupancy = Math.round((occupied / rooms.length) * 100);
-  const diff = shift.expectedTotal - shift.countedTotal;
+  const diff = totalDiff(shift);
 
   const counts = ROOM_STATUS_ORDER.map((status) => ({
     status,
@@ -49,9 +52,13 @@ export default function DashboardPage() {
     <div className="mx-auto max-w-5xl">
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <span className="kicker text-gold">Panel</span>
-          <h1 className="mt-3 font-display text-3xl text-cream sm:text-4xl">Resumen del turno</h1>
-          <p className="mt-2 text-sm text-muted">Recepción · turno noche</p>
+          <span className="kicker text-gold">{user?.roleLabel ?? "Panel"}</span>
+          <h1 className="mt-3 font-display text-3xl text-cream sm:text-4xl">
+            {user?.role === "admin" ? "Resumen general" : "Resumen del turno"}
+          </h1>
+          <p className="mt-2 text-sm text-muted">
+            {user ? `${user.name} · ${user.context}` : "Panel"}
+          </p>
         </div>
         <button
           type="button"
@@ -66,7 +73,7 @@ export default function DashboardPage() {
         <StatCard label="Ocupación" value={`${occupancy}%`} hint={`${occupied} de ${rooms.length} ocupadas`} />
         <StatCard
           label="Ingresos del turno"
-          value={formatCLP(shift.countedTotal)}
+          value={formatCLP(ingresosTotales(shift))}
           accent
           hint={`${transactions.length} pagos`}
         />
@@ -74,7 +81,7 @@ export default function DashboardPage() {
         <StatCard
           label="Diferencia de caja"
           value={diff === 0 ? "Cuadrado" : formatCLP(Math.abs(diff))}
-          hint={diff > 0 ? "Falta en caja" : diff < 0 ? "Sobra en caja" : "Sin descuadre"}
+          hint={diff < 0 ? "Falta en caja" : diff > 0 ? "Sobra en caja" : "Sin descuadre"}
         />
       </div>
 

@@ -13,7 +13,8 @@ interface ModalProps {
 export function Modal({ title, subtitle, onClose, children }: ModalProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      // Si un hijo ya manejó Escape (p. ej. cerrar un Select abierto), no cerramos el modal.
+      if (e.key === "Escape" && !e.defaultPrevented) onClose();
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";

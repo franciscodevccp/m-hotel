@@ -1,12 +1,11 @@
 import Image from "next/image";
 import Link from "next/link";
-import { CategoryCard } from "@/components/public/CategoryCard";
+import { CategoryGrid } from "@/components/public/CategoryGrid";
 import { Hero } from "@/components/public/Hero";
 import { ServiceList } from "@/components/public/ServiceList";
 import { buttonStyles } from "@/components/ui/Button";
 import { Reveal } from "@/components/ui/Reveal";
 import { Stat } from "@/components/ui/Stat";
-import { CATEGORIES } from "@/data/categories";
 import { SITE } from "@/lib/site";
 
 export default function HomePage() {
@@ -45,13 +44,7 @@ export default function HomePage() {
             </p>
           </Reveal>
 
-          <div className="mt-14 grid grid-cols-1 gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-4">
-            {CATEGORIES.map((category, i) => (
-              <Reveal key={category.id} delay={i * 0.08}>
-                <CategoryCard category={category} />
-              </Reveal>
-            ))}
-          </div>
+          <CategoryGrid />
         </div>
       </section>
 

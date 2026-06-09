@@ -8,7 +8,8 @@ import {
   DAY_LABELS,
   DURATION_LABELS,
   formatCLP,
-  formatTime,
+  formatDate,
+  formatTime12,
 } from "@/lib/format";
 import { getCategory } from "@/lib/pricing";
 import { SITE } from "@/lib/site";
@@ -55,7 +56,8 @@ export function ConfirmedView({ id }: { id: string | null }) {
   }
 
   const category = getCategory(reservation.categoryId);
-  const endTime = addHours(new Date(reservation.createdAt), reservation.duration);
+  const arrivalAt = new Date(reservation.arrivalAt ?? reservation.createdAt);
+  const endTime = addHours(arrivalAt, reservation.duration);
   const message = buildReservationMessage(reservation, endTime);
   const waUrl = whatsappUrl(message);
 
@@ -77,10 +79,15 @@ export function ConfirmedView({ id }: { id: string | null }) {
           <span className="tnum text-sm text-cream">{reservation.id}</span>
         </div>
         <dl className="mt-5 space-y-4 border-t border-line pt-5">
+          <Row label="Fecha" value={formatDate(arrivalAt)} />
           <Row label="Categoría" value={`${category.name} · ${category.area} m²`} />
+          {reservation.roomId && (
+            <Row label="Habitación" value={`Habitación ${reservation.roomId}`} />
+          )}
           <Row label="Día" value={DAY_LABELS[reservation.dayType]} />
           <Row label="Bloque" value={DURATION_LABELS[reservation.duration]} />
-          <Row label="Término estimado" value={formatTime(endTime)} />
+          <Row label="Llegada estimada" value={formatTime12(arrivalAt)} />
+          <Row label="Término estimado" value={formatTime12(endTime)} />
           <Row label="A nombre de" value={reservation.guestName} />
         </dl>
         <div className="mt-6 flex items-center justify-between border-t border-line pt-5">

@@ -1,14 +1,39 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { AdminNav } from "@/components/admin/AdminNav";
+import { useSession } from "@/lib/session";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, hydrated } = useSession();
+
+  const isLogin = pathname === "/admin/login";
+
+  // Sin sesión, el panel redirige al login. El aseo queda confinado a su pantalla.
+  useEffect(() => {
+    if (isLogin || !hydrated) return;
+    if (!user) {
+      router.replace("/admin/login");
+      return;
+    }
+    const aseoAllowed =
+      pathname.startsWith("/admin/aseo") || pathname.startsWith("/admin/lavanderia");
+    if (user.role === "aseo" && !aseoAllowed) {
+      router.replace("/admin/aseo");
+    }
+  }, [isLogin, hydrated, user, pathname, router]);
 
   // El login va a pantalla completa, sin el shell del panel.
-  if (pathname === "/admin/login") {
+  if (isLogin) {
     return <>{children}</>;
+  }
+
+  // Mientras hidrata o si no hay sesión, no pintamos el shell (evita parpadeo).
+  if (!hydrated || !user) {
+    return null;
   }
 
   return (

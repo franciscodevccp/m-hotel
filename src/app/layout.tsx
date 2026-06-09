@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import { Fraunces, Hanken_Grotesk } from "next/font/google";
+import { Fraunces, Instrument_Sans } from "next/font/google";
 import "./globals.css";
+import { SessionProvider } from "@/lib/session";
 import { AppStoreProvider } from "@/lib/store";
 
 const fraunces = Fraunces({
@@ -9,9 +10,9 @@ const fraunces = Fraunces({
   display: "swap",
 });
 
-const hanken = Hanken_Grotesk({
+const instrument = Instrument_Sans({
   subsets: ["latin"],
-  variable: "--font-hanken",
+  variable: "--font-instrument",
   display: "swap",
 });
 
@@ -25,9 +26,11 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es" className={`${fraunces.variable} ${hanken.variable} h-full`}>
+    <html lang="es" className={`${fraunces.variable} ${instrument.variable} h-full`}>
       <body className="min-h-full antialiased">
-        <AppStoreProvider>{children}</AppStoreProvider>
+        <SessionProvider>
+          <AppStoreProvider>{children}</AppStoreProvider>
+        </SessionProvider>
         <div className="grain" aria-hidden />
       </body>
     </html>
