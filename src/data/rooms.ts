@@ -1,3 +1,5 @@
+import { DEMO_CLIENT } from "@/lib/demo";
+import { getCategory, priceFor } from "@/lib/pricing";
 import type { Room } from "@/types";
 
 // 20 habitaciones: 8 Standard Vip, 6 Vip con Jacuzzi, 4 Jacuzzi Premium, 2 BLACK.
@@ -22,7 +24,20 @@ export const ROOMS: Room[] = [
   { id: "301", number: 301, categoryId: "jacuzzi-premium", status: "available" },
   { id: "302", number: 302, categoryId: "jacuzzi-premium", status: "occupied" },
   { id: "303", number: 303, categoryId: "jacuzzi-premium", status: "available" },
-  { id: "304", number: 304, categoryId: "jacuzzi-premium", status: "occupied" },
+  {
+    id: "304",
+    number: 304,
+    categoryId: "jacuzzi-premium",
+    status: "occupied",
+    // Estancia activa del cliente de la demo: su habitación ya está asignada.
+    stay: {
+      dayType: "weekend",
+      duration: 6,
+      total: priceFor(getCategory("jacuzzi-premium"), "weekend", 6),
+      guestName: DEMO_CLIENT.name,
+      checkInAt: "2026-06-09T21:30:00",
+    },
+  },
   { id: "401", number: 401, categoryId: "black", status: "occupied" },
   { id: "402", number: 402, categoryId: "black", status: "available" },
 ];

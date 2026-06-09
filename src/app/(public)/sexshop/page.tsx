@@ -34,7 +34,7 @@ export default function SexshopPage() {
       {catalog.length === 0 ? (
         <p className="text-sm text-muted">Catálogo no disponible por ahora.</p>
       ) : (
-        <CatalogList products={catalog} />
+        <CatalogList products={catalog} withCart />
       )}
 
       <p className="mt-14 border-t border-line pt-6 text-xs leading-relaxed text-dim">

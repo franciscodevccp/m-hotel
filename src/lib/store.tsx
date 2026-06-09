@@ -10,6 +10,7 @@ import {
 } from "react";
 import { CATEGORIES } from "@/data/categories";
 import { SEED_ANOMALIES } from "@/data/anomalies";
+import { SEED_COUPONS } from "@/data/coupons";
 import { SEED_LAUNDRY } from "@/data/laundry";
 import { SEED_PACKAGES } from "@/data/packages";
 import { SEED_DISCOUNTS, SEED_PROMOTIONS } from "@/data/pricingRules";
@@ -17,16 +18,20 @@ import { SEED_MOVEMENTS, SEED_PRODUCTS } from "@/data/products";
 import { SEED_RECEIVABLES } from "@/data/receivables";
 import { SEED_RESERVATIONS } from "@/data/reservations";
 import { SEED_ROOM_SERVICE } from "@/data/roomService";
+import { SEED_SHOP_ORDERS } from "@/data/shopOrders";
+import { DEFAULT_SHOP_SETTINGS } from "@/data/shopSettings";
 import { ROOMS, SEED_OCCUPIED_MINUTES } from "@/data/rooms";
 import { DEFAULT_SETTINGS, SEED_BLACKLIST, SEED_USERS } from "@/data/settings";
 import { SEED_EXPENSES, SEED_SHIFT, SEED_TRANSACTIONS } from "@/data/shifts";
 import { makeId } from "@/lib/id";
 import { extraHourFor, priceFor } from "@/lib/pricing";
+import { SHOP_NEXT } from "@/lib/shop";
 import type {
   Anomaly,
   BlacklistEntry,
   Category,
   CleaningLogEntry,
+  Coupon,
   DayType,
   Discount,
   Duration,
@@ -46,12 +51,14 @@ import type {
   RoomStatus,
   SalesChannel,
   Shift,
+  ShopOrder,
+  ShopSettings,
   StaffUser,
   Transaction,
   VenueSettings,
 } from "@/types";
 
-const STORAGE_KEY = "m-motel-state-v6";
+const STORAGE_KEY = "m-motel-state-v8";
 
 interface AppState {
   reservations: Reservation[];
@@ -74,6 +81,9 @@ interface AppState {
   blacklist: BlacklistEntry[];
   maintenanceReports: MaintenanceReport[];
   cleaningLog: CleaningLogEntry[];
+  shopOrders: ShopOrder[];
+  coupons: Coupon[];
+  shopSettings: ShopSettings;
 }
 
 interface AppStore extends AppState {
@@ -152,6 +162,18 @@ interface AppStore extends AppState {
   removeBlacklistEntry: (id: string) => void;
   /** Simula un respaldo en la nube: deja la marca de tiempo del último respaldo. */
   backupNow: () => void;
+  /** Crea un pedido en la tienda online (checkout público). */
+  addShopOrder: (order: ShopOrder) => void;
+  /** Avanza el estado de un pedido de la tienda online (pendiente→…→entregado). */
+  advanceShopOrder: (id: string) => void;
+  /** Cancela un pedido de la tienda online (si no está entregado/cancelado). */
+  cancelShopOrder: (id: string) => void;
+  /** Crea un cupón de descuento de la tienda. */
+  addCoupon: (coupon: Coupon) => void;
+  /** Actualiza un cupón (datos o activación). */
+  updateCoupon: (coupon: Coupon) => void;
+  /** Actualiza los ajustes de la tienda online. */
+  updateShopSettings: (patch: Partial<ShopSettings>) => void;
   resetDemo: () => void;
 }
 
@@ -180,6 +202,9 @@ function seedState(): AppState {
     blacklist: SEED_BLACKLIST,
     maintenanceReports: [],
     cleaningLog: [],
+    shopOrders: SEED_SHOP_ORDERS,
+    coupons: SEED_COUPONS,
+    shopSettings: DEFAULT_SHOP_SETTINGS,
   };
 }
 
@@ -237,6 +262,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           blacklist: parsed.blacklist ?? prev.blacklist,
           maintenanceReports: parsed.maintenanceReports ?? prev.maintenanceReports,
           cleaningLog: parsed.cleaningLog ?? prev.cleaningLog,
+          shopOrders: parsed.shopOrders ?? prev.shopOrders,
+          coupons: parsed.coupons ?? prev.coupons,
+          shopSettings: parsed.shopSettings ?? prev.shopSettings,
         }));
       } else {
         setState((prev) => ({ ...prev, rooms: seedRoomTimes(prev.rooms) }));
@@ -797,6 +825,55 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const addShopOrder = useCallback((order: ShopOrder) => {
+    setState((prev) => ({ ...prev, shopOrders: [order, ...prev.shopOrders] }));
+  }, []);
+
+  const advanceShopOrder = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      shopOrders: prev.shopOrders.map((o) => {
+        if (o.id !== id) return o;
+        const next = SHOP_NEXT[o.status];
+        if (!next) return o;
+        const at = new Date().toISOString();
+        return {
+          ...o,
+          status: next,
+          paidAt: next === "pagado" ? at : o.paidAt,
+          shippedAt: next === "despachado" ? at : o.shippedAt,
+          deliveredAt: next === "entregado" ? at : o.deliveredAt,
+        };
+      }),
+    }));
+  }, []);
+
+  const cancelShopOrder = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      shopOrders: prev.shopOrders.map((o) =>
+        o.id === id && o.status !== "entregado" && o.status !== "cancelado"
+          ? { ...o, status: "cancelado" }
+          : o,
+      ),
+    }));
+  }, []);
+
+  const addCoupon = useCallback((coupon: Coupon) => {
+    setState((prev) => ({ ...prev, coupons: [coupon, ...prev.coupons] }));
+  }, []);
+
+  const updateCoupon = useCallback((coupon: Coupon) => {
+    setState((prev) => ({
+      ...prev,
+      coupons: prev.coupons.map((c) => (c.id === coupon.id ? coupon : c)),
+    }));
+  }, []);
+
+  const updateShopSettings = useCallback((patch: Partial<ShopSettings>) => {
+    setState((prev) => ({ ...prev, shopSettings: { ...prev.shopSettings, ...patch } }));
+  }, []);
+
   const resetDemo = useCallback(() => {
     const fresh = seedState();
     setState({ ...fresh, rooms: seedRoomTimes(fresh.rooms) });
@@ -845,6 +922,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     addBlacklistEntry,
     removeBlacklistEntry,
     backupNow,
+    addShopOrder,
+    advanceShopOrder,
+    cancelShopOrder,
+    addCoupon,
+    updateCoupon,
+    updateShopSettings,
     resetDemo,
   };
 

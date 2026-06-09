@@ -138,7 +138,9 @@ export default function RoomServicePage() {
               >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm text-cream">Habitación {roomNumber(o.roomId)}</span>
+                    <span className="text-sm text-cream">
+                      {o.roomId ? `Habitación ${roomNumber(o.roomId)}` : "Pedido online"}
+                    </span>
                     <span className={cn("kicker", STATUS_CLASS[o.status])}>
                       {STATUS_LABEL[o.status]}
                     </span>

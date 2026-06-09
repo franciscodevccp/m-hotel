@@ -216,6 +216,9 @@
   .reveal-show {
     opacity: 1;
     transform: none;
+    /* Soltar la capa compositada una vez visible: si no, un overlay fixed
+       (como el menú móvil) puede dibujarse por detrás del contenido. */
+    will-change: auto;
   }
 }
 

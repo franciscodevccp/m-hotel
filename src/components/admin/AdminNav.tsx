@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
-import type { Role } from "@/types";
+import type { AdminArea, Role } from "@/types";
 
 interface NavLink {
   href: string;
@@ -12,19 +12,17 @@ interface NavLink {
   roles: Role[];
 }
 
+interface NavGroup {
+  title: string;
+  links: NavLink[];
+}
+
 const BOTH: Role[] = ["recepcion", "admin"];
 const ADMIN: Role[] = ["admin"];
 
-// Menú organizado como el del software actual: Operación, Inventario, Precios,
-// Reportes y Configuración. Recepción no ve precios, reportes ni configuración.
-const GROUPS: { title: string; links: NavLink[] }[] = [
-  {
-    title: "Aseo",
-    links: [
-      { href: "/admin/aseo", label: "Mis habitaciones", roles: ["aseo"] },
-      { href: "/admin/lavanderia", label: "Lavandería", roles: ["aseo"] },
-    ],
-  },
+// Área Motel: operación del recinto. Recepción ve un subconjunto (sin precios,
+// reportes ni configuración).
+const MOTEL_GROUPS: NavGroup[] = [
   {
     title: "Operación",
     links: [
@@ -63,37 +61,112 @@ const GROUPS: { title: string; links: NavLink[] }[] = [
   },
 ];
 
+// Área Tienda online: inventario y precios del sexshop, separados del motel.
+const TIENDA_GROUPS: NavGroup[] = [
+  {
+    title: "Tienda online",
+    links: [
+      { href: "/admin/tienda", label: "Resumen", roles: ADMIN },
+      { href: "/admin/pedidos", label: "Pedidos", roles: ADMIN },
+      { href: "/admin/inventario", label: "Inventario y precios", roles: ADMIN },
+      { href: "/admin/categorias", label: "Categorías", roles: ADMIN },
+    ],
+  },
+  {
+    title: "Crecimiento",
+    links: [
+      { href: "/admin/cupones", label: "Cupones", roles: ADMIN },
+      { href: "/admin/clientes", label: "Clientes", roles: ADMIN },
+      { href: "/admin/reportes-tienda", label: "Reportes", roles: ADMIN },
+    ],
+  },
+  {
+    title: "Configuración",
+    links: [{ href: "/admin/configuracion-tienda", label: "Configuración", roles: ADMIN }],
+  },
+];
+
+// Área del aseo: una sola cola de trabajo.
+const ASEO_GROUPS: NavGroup[] = [
+  {
+    title: "Aseo",
+    links: [
+      { href: "/admin/aseo", label: "Mis habitaciones", roles: ["aseo"] },
+      { href: "/admin/lavanderia", label: "Lavandería", roles: ["aseo"] },
+    ],
+  },
+];
+
+const AREA_HOME: Record<AdminArea, string> = { motel: "/admin", tienda: "/admin/tienda" };
+
 export function AdminNav() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, logout } = useSession();
+  const { user, area, setArea, logout } = useSession();
 
   const isActive = (href: string) =>
-    href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+    href === "/admin" || href === "/admin/tienda"
+      ? pathname === href
+      : pathname.startsWith(href);
 
-  const visibleGroups = GROUPS.map((group) => ({
-    ...group,
-    links: group.links.filter((link) => !user || link.roles.includes(user.role)),
-  })).filter((group) => group.links.length > 0);
+  const baseGroups =
+    user?.role === "aseo"
+      ? ASEO_GROUPS
+      : user?.role === "admin" && area === "tienda"
+        ? TIENDA_GROUPS
+        : MOTEL_GROUPS;
+
+  const visibleGroups = baseGroups
+    .map((group) => ({
+      ...group,
+      links: group.links.filter((link) => !user || link.roles.includes(user.role)),
+    }))
+    .filter((group) => group.links.length > 0);
 
   const flatLinks = visibleGroups.flatMap((group) => group.links);
   const initial = (user?.name ?? "M").charAt(0).toUpperCase();
+  const isAdmin = user?.role === "admin";
 
   function signOut() {
     logout();
     router.push("/admin/login");
   }
 
+  function switchArea(next: AdminArea) {
+    setArea(next);
+    router.push(AREA_HOME[next]);
+  }
+
+  const AreaSwitch = isAdmin ? (
+    <div className="flex gap-1 rounded-sm border border-line bg-surface/60 p-1">
+      {(["motel", "tienda"] as AdminArea[]).map((a) => (
+        <button
+          key={a}
+          type="button"
+          onClick={() => switchArea(a)}
+          className={cn(
+            "flex-1 rounded-xs px-2 py-1.5 text-[0.7rem] font-medium uppercase tracking-[0.1em] transition-colors",
+            area === a ? "bg-gold text-bg" : "text-muted hover:text-cream",
+          )}
+        >
+          {a === "motel" ? "Motel" : "Tienda"}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
   return (
     <>
       {/* Sidebar — desktop */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-line bg-surface/50 lg:flex">
         <div className="px-6 pt-5">
-          <Link href="/admin" className="flex items-baseline gap-2">
+          <div className="flex items-baseline gap-2">
             <span className="font-display text-2xl text-cream">M</span>
             <span className="kicker text-dim">Panel</span>
-          </Link>
+          </div>
         </div>
+
+        {isAdmin && <div className="mt-4 px-4">{AreaSwitch}</div>}
 
         <nav className="mt-4 flex-1 space-y-3 overflow-y-auto px-4 pb-3">
           {visibleGroups.map((group) => (
@@ -144,10 +217,10 @@ export function AdminNav() {
       {/* Topbar — mobile */}
       <div className="fixed inset-x-0 top-0 z-40 border-b border-line bg-bg/90 backdrop-blur lg:hidden">
         <div className="flex h-14 items-center justify-between px-5">
-          <Link href="/admin" className="flex items-baseline gap-2">
+          <div className="flex items-baseline gap-2">
             <span className="font-display text-xl text-cream">M</span>
             <span className="kicker text-dim">{user?.roleLabel ?? "Panel"}</span>
-          </Link>
+          </div>
           <button
             type="button"
             onClick={signOut}
@@ -156,6 +229,7 @@ export function AdminNav() {
             Salir
           </button>
         </div>
+        {isAdmin && <div className="px-3 pb-2">{AreaSwitch}</div>}
         <nav className="flex gap-1 overflow-x-auto px-3 pb-2">
           {flatLinks.map((link) => (
             <Link

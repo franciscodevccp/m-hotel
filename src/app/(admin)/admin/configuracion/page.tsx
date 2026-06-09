@@ -4,10 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
-import { MoneyInput } from "@/components/ui/MoneyInput";
 import { Select } from "@/components/ui/Select";
 import { CATEGORIES } from "@/data/categories";
-import { formatCLP, formatDateTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { makeId } from "@/lib/id";
 import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
@@ -62,7 +61,6 @@ export default function ConfiguracionPage() {
   } = useAppStore();
   const { user } = useSession();
 
-  const [newDenom, setNewDenom] = useState(0);
   const [newEmail, setNewEmail] = useState("");
   const [userModal, setUserModal] = useState(false);
   const [userName, setUserName] = useState("");
@@ -89,11 +87,6 @@ export default function ConfiguracionPage() {
     );
   }
 
-  function addDenomination() {
-    if (newDenom <= 0 || settings.denominations.includes(newDenom)) return;
-    updateSettings({ denominations: [...settings.denominations, newDenom].sort((a, b) => b - a) });
-    setNewDenom(0);
-  }
   function addEmail() {
     const email = newEmail.trim();
     if (!email || settings.notificationEmails.includes(email)) return;
@@ -235,46 +228,6 @@ export default function ConfiguracionPage() {
             </Link>
             .
           </p>
-        </Section>
-
-        {/* Denominaciones */}
-        <Section
-          title="Billetes y monedas"
-          description="Denominaciones que se cuentan en el arqueo de caja."
-        >
-          <div className="flex flex-wrap gap-2">
-            {settings.denominations.map((d) => (
-              <span
-                key={d}
-                className="tnum flex items-center gap-2 border border-line px-3 py-1.5 text-sm text-cream"
-              >
-                {formatCLP(d)}
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateSettings({
-                      denominations: settings.denominations.filter((x) => x !== d),
-                    })
-                  }
-                  aria-label={`Quitar ${formatCLP(d)}`}
-                  className="text-dim transition-colors hover:text-busy"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="mt-4 flex gap-2">
-            <MoneyInput
-              value={newDenom}
-              onValueChange={setNewDenom}
-              placeholder="Agregar denominación"
-              className="min-h-[44px] flex-1 rounded-sm border border-line bg-surface px-3 py-2.5 text-sm text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none sm:max-w-xs"
-            />
-            <Button variant="secondary" onClick={addDenomination} disabled={newDenom <= 0}>
-              Agregar
-            </Button>
-          </div>
         </Section>
 
         {/* Usuarios y roles */}

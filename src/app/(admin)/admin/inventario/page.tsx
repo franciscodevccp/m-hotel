@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { StockBadge, stockLevel } from "@/components/admin/StockBadge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -39,17 +39,18 @@ const fieldClass =
 
 const PAGE_SIZE = 15;
 
-function emptyProduct(): Product {
+function emptyProduct(family: ProductCategory): Product {
+  const isShop = family === "sexshop";
   return {
     id: makeId("p"),
     sku: "",
     name: "",
-    category: "carta",
+    category: family,
     price: 0,
     stock: 0,
     lowStockThreshold: 10,
-    channels: ["room_service"],
-    ageRestricted: false,
+    channels: isShop ? ["online", "presencial"] : ["room_service"],
+    ageRestricted: isShop,
     image: null,
     description: "",
     active: true,
@@ -58,8 +59,10 @@ function emptyProduct(): Product {
 
 export default function InventarioPage() {
   const { products, movements, addProduct, updateProduct, adjustStock } = useAppStore();
-  const { user } = useSession();
+  const { user, area } = useSession();
   const canManage = user?.role === "admin";
+  // Motel = carta (room service); Tienda online = sexshop. Inventarios separados.
+  const family: ProductCategory = area === "tienda" ? "sexshop" : "carta";
 
   const [editing, setEditing] = useState<Product | null>(null);
   const [isNew, setIsNew] = useState(false);
@@ -69,33 +72,43 @@ export default function InventarioPage() {
   const [query, setQuery] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
 
-  // Por ahora el inventario muestra solo la carta (room service); el resto se habilita luego.
-  const cartaAll = useMemo(() => products.filter((p) => p.category === "carta"), [products]);
+  // El inventario muestra solo la familia del área activa (carta o sexshop).
+  const familyProducts = useMemo(
+    () => products.filter((p) => p.category === family),
+    [products, family],
+  );
   const groupOptions = useMemo(() => {
     const seen: string[] = [];
-    for (const p of cartaAll) if (p.group && !seen.includes(p.group)) seen.push(p.group);
+    for (const p of familyProducts) if (p.group && !seen.includes(p.group)) seen.push(p.group);
     return seen;
-  }, [cartaAll]);
-  const lowCount = cartaAll.filter((p) => stockLevel(p) !== "ok").length;
-  const groupCount = new Set(cartaAll.map((p) => p.group).filter(Boolean)).size;
+  }, [familyProducts]);
+  const lowCount = familyProducts.filter((p) => stockLevel(p) !== "ok").length;
+  const groupCount = new Set(familyProducts.map((p) => p.group).filter(Boolean)).size;
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(
     () =>
-      cartaAll
+      familyProducts
         .filter((p) => groupFilter === "all" || p.group === groupFilter)
         .filter((p) => !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))
         .slice()
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [cartaAll, groupFilter, q],
+    [familyProducts, groupFilter, q],
   );
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const pageItems = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
+  // Al cambiar de área, reinicia el filtro y la página (los grupos cambian).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset al cambiar de familia
+    setGroupFilter("all");
+    setPage(0);
+  }, [family]);
+
   function openNew() {
-    setEditing(emptyProduct());
+    setEditing(emptyProduct(family));
     setIsNew(true);
   }
   function openEdit(product: Product) {
@@ -116,8 +129,9 @@ export default function InventarioPage() {
           <span className="kicker text-gold">Inventario</span>
           <h1 className="mt-3 font-display text-3xl text-cream sm:text-4xl">Productos y stock</h1>
           <p className="mt-2 text-sm text-muted">
-            Carta de room service. El resto del inventario (sexshop y minibar) se habilita más
-            adelante.
+            {area === "tienda"
+              ? "Catálogo y stock de la tienda online (sexshop). Va por separado del inventario del motel."
+              : "Carta de room service del motel. El sexshop se gestiona en la tienda online."}
           </p>
         </div>
         <div className="flex shrink-0 gap-3">
@@ -131,7 +145,7 @@ export default function InventarioPage() {
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <div className="border border-line bg-surface/40 p-4">
           <p className="kicker text-dim">Productos</p>
-          <p className="tnum mt-2 font-display text-2xl text-cream">{cartaAll.length}</p>
+          <p className="tnum mt-2 font-display text-2xl text-cream">{familyProducts.length}</p>
         </div>
         <div className="border border-line bg-surface/40 p-4">
           <p className="kicker text-dim">Stock bajo</p>
@@ -308,7 +322,7 @@ export default function InventarioPage() {
                   id="p-cat"
                   value={editing.category}
                   onValueChange={(v) => setEditing({ ...editing, category: v as ProductCategory })}
-                  options={[{ value: "carta", label: CATEGORY_LABELS.carta }]}
+                  options={[{ value: family, label: CATEGORY_LABELS[family] }]}
                 />
               </div>
             </div>
@@ -439,6 +453,7 @@ export default function InventarioPage() {
         <MovementsModal
           movements={movements}
           products={products}
+          family={family}
           onClose={() => setShowMovements(false)}
         />
       )}
@@ -456,16 +471,18 @@ const MOVEMENT_LABELS: Record<MovementType, string> = {
 function MovementsModal({
   movements,
   products,
+  family,
   onClose,
 }: {
   movements: InventoryMovement[];
   products: Product[];
+  family: ProductCategory;
   onClose: () => void;
 }) {
   const byId = new Map(products.map((p) => [p.id, p]));
-  // Por ahora solo se muestran los movimientos de la carta (room service).
+  // Solo los movimientos de la familia del área activa (carta o sexshop).
   const recent = [...movements]
-    .filter((m) => byId.get(m.productId)?.category === "carta")
+    .filter((m) => byId.get(m.productId)?.category === family)
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, 50);
 

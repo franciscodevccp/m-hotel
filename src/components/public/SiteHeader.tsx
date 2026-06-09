@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { AccountMenu } from "@/components/public/AccountMenu";
 import { buttonStyles } from "@/components/ui/Button";
+import { useVisitor } from "@/lib/visitor";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -15,6 +17,8 @@ const NAV = [
 ];
 
 export function SiteHeader() {
+  const { visitor, signOut } = useVisitor();
+  const registered = visitor?.mode === "registered";
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -34,12 +38,13 @@ export function SiteHeader() {
   }, [open]);
 
   return (
-    <header
-      className={cn(
-        "fixed inset-x-0 top-0 z-50 border-b transition-colors duration-500",
-        scrolled ? "border-line bg-bg/85 backdrop-blur-md" : "border-transparent",
-      )}
-    >
+    <>
+      <header
+        className={cn(
+          "fixed inset-x-0 top-0 z-[60] border-b transition-colors duration-500",
+          scrolled || open ? "border-line bg-bg/95 backdrop-blur-md" : "border-transparent",
+        )}
+      >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:h-20 sm:px-8">
         <div className="flex select-none items-baseline gap-2">
           <span className="font-display text-2xl leading-none tracking-tight text-cream">M</span>
@@ -59,12 +64,16 @@ export function SiteHeader() {
         </nav>
 
         <div className="flex items-center gap-4">
-          <Link
-            href="/admin/login"
-            className="hidden text-xs uppercase tracking-[0.16em] text-dim transition-colors hover:text-muted sm:inline"
-          >
-            Acceso
-          </Link>
+          {registered ? (
+            <AccountMenu />
+          ) : (
+            <Link
+              href="/admin/login"
+              className="hidden text-xs uppercase tracking-[0.16em] text-dim transition-colors hover:text-muted sm:inline"
+            >
+              Acceso
+            </Link>
+          )}
           <Link
             href="/reservar"
             className={cn(buttonStyles({ variant: "primary", size: "sm" }), "hidden sm:inline-flex")}
@@ -95,9 +104,10 @@ export function SiteHeader() {
           </button>
         </div>
       </div>
+      </header>
 
       {open && (
-        <div className="fixed inset-x-0 bottom-0 top-16 z-40 flex flex-col bg-bg px-5 pb-10 pt-10 md:hidden">
+        <div className="fixed inset-x-0 bottom-0 top-16 z-[60] flex flex-col bg-bg px-5 pb-10 pt-10 md:hidden">
           <nav className="flex flex-col gap-7">
             {NAV.map((link) => (
               <Link
@@ -109,6 +119,15 @@ export function SiteHeader() {
                 {link.label}
               </Link>
             ))}
+            {registered && (
+              <Link
+                href="/cuenta"
+                onClick={() => setOpen(false)}
+                className="font-display text-4xl text-gold"
+              >
+                Mi cuenta
+              </Link>
+            )}
           </nav>
           <div className="mt-auto flex flex-col gap-3">
             <Link
@@ -118,16 +137,29 @@ export function SiteHeader() {
             >
               Reservar
             </Link>
-            <Link
-              href="/admin/login"
-              onClick={() => setOpen(false)}
-              className={buttonStyles({ variant: "secondary", size: "lg" })}
-            >
-              Acceso al panel
-            </Link>
+            {registered ? (
+              <button
+                type="button"
+                onClick={() => {
+                  signOut();
+                  setOpen(false);
+                }}
+                className={buttonStyles({ variant: "secondary", size: "lg" })}
+              >
+                Cerrar sesión
+              </button>
+            ) : (
+              <Link
+                href="/admin/login"
+                onClick={() => setOpen(false)}
+                className={buttonStyles({ variant: "secondary", size: "lg" })}
+              >
+                Acceso al panel
+              </Link>
+            )}
           </div>
         </div>
       )}
-    </header>
+    </>
   );
 }

@@ -8,9 +8,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Role, SessionUser } from "@/types";
+import type { AdminArea, Role, SessionUser } from "@/types";
 
 const STORAGE_KEY = "m-motel-session-v1";
+const AREA_KEY = "m-motel-area-v1";
 
 /** Usuarios simulados del panel. Cada rol abre una vista distinta. */
 export const SESSION_USERS: Record<Role, SessionUser> = {
@@ -36,28 +37,36 @@ export const SESSION_USERS: Record<Role, SessionUser> = {
 
 interface SessionStore {
   user: SessionUser | null;
+  /** Área activa del administrador (motel / tienda online). Parte en motel. */
+  area: AdminArea;
   /** true una vez leído localStorage en el cliente. */
   hydrated: boolean;
   login: (role: Role) => void;
   logout: () => void;
+  setArea: (area: AdminArea) => void;
 }
 
 const SessionContext = createContext<SessionStore | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [area, setAreaState] = useState<AdminArea>("motel");
   const [hydrated, setHydrated] = useState(false);
 
-  // Restaurar la sesión guardada en el cliente.
+  // Restaurar la sesión y el área guardadas en el cliente.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const role = JSON.parse(raw) as Role;
-        if (role === "recepcion" || role === "admin") {
+        if (role === "recepcion" || role === "admin" || role === "aseo") {
           // eslint-disable-next-line react-hooks/set-state-in-effect -- hidratación única desde localStorage en el cliente
           setUser(SESSION_USERS[role]);
         }
+      }
+      const areaRaw = localStorage.getItem(AREA_KEY);
+      if (areaRaw === "motel" || areaRaw === "tienda") {
+        setAreaState(areaRaw);
       }
     } catch {
       // Si localStorage no está disponible, seguimos sin sesión.
@@ -67,8 +76,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback((role: Role) => {
     setUser(SESSION_USERS[role]);
+    setAreaState("motel"); // al entrar, el admin parte en el motel
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(role));
+      localStorage.removeItem(AREA_KEY);
     } catch {
       // Ignorar errores de cuota o modo privado.
     }
@@ -76,15 +87,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setUser(null);
+    setAreaState("motel");
     try {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(AREA_KEY);
+    } catch {
+      // Ignorar.
+    }
+  }, []);
+
+  const setArea = useCallback((next: AdminArea) => {
+    setAreaState(next);
+    try {
+      localStorage.setItem(AREA_KEY, next);
     } catch {
       // Ignorar.
     }
   }, []);
 
   return (
-    <SessionContext.Provider value={{ user, hydrated, login, logout }}>
+    <SessionContext.Provider value={{ user, area, hydrated, login, logout, setArea }}>
       {children}
     </SessionContext.Provider>
   );

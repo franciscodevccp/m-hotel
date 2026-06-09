@@ -1,3 +1,4 @@
+import { DEMO_CLIENT } from "@/lib/demo";
 import { getCategory, priceFor } from "@/lib/pricing";
 import type { CategoryId, DayType, Duration, Reservation } from "@/types";
 
@@ -8,6 +9,34 @@ function total(categoryId: CategoryId, dayType: DayType, duration: Duration): nu
 // Reservas precargadas para poblar el panel admin. A esta lista se suman, en el
 // cliente, las reservas que llegan del flujo público.
 export const SEED_RESERVATIONS: Reservation[] = [
+  {
+    id: "r-1044",
+    categoryId: "jacuzzi-premium",
+    roomId: "304",
+    dayType: "weekend",
+    duration: 6,
+    guestName: DEMO_CLIENT.name,
+    guestEmail: DEMO_CLIENT.email,
+    guestPhone: DEMO_CLIENT.phone,
+    guestRut: DEMO_CLIENT.rut,
+    total: total("jacuzzi-premium", "weekend", 6),
+    createdAt: "2026-06-09T20:00:00",
+    arrivalAt: "2026-06-09T21:30:00",
+    status: "confirmed",
+  },
+  {
+    id: "r-1037",
+    categoryId: "vip-jacuzzi",
+    dayType: "weekday",
+    duration: 3,
+    guestName: DEMO_CLIENT.name,
+    guestEmail: DEMO_CLIENT.email,
+    guestPhone: DEMO_CLIENT.phone,
+    guestRut: DEMO_CLIENT.rut,
+    total: total("vip-jacuzzi", "weekday", 3),
+    createdAt: "2026-05-22T20:00:00",
+    status: "confirmed",
+  },
   {
     id: "r-1042",
     categoryId: "black",

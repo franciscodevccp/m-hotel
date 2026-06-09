@@ -271,8 +271,90 @@ export interface CleaningLogEntry {
   minutes?: number; // cuánto tomó la limpieza (desde que se empezó)
 }
 
+// --- Tienda online (e-commerce del sexshop) ---
+
+/** Estado de un pedido de la tienda online. */
+export type ShopOrderStatus =
+  | "pendiente" // creado, sin pago confirmado
+  | "pagado" // pago confirmado
+  | "preparando" // en preparación / embalaje
+  | "despachado" // en camino (o listo para retiro)
+  | "entregado"
+  | "cancelado";
+
+/** Forma de entrega del pedido. */
+export type ShopFulfillment = "despacho" | "retiro";
+
+/** Medio de pago del pedido online. */
+export type ShopPaymentMethod = "webpay" | "transferencia" | "efectivo";
+
+export interface ShopOrderItem {
+  productId: string;
+  name: string; // nombre al momento de la compra
+  quantity: number;
+  unitPrice: number; // precio unitario al momento de la compra
+}
+
+/** Pedido de la tienda online. Va por separado de la caja del motel. */
+export interface ShopOrder {
+  id: string;
+  folio: number;
+  customerName: string;
+  customerRut?: string;
+  customerEmail: string;
+  customerPhone: string;
+  fulfillment: ShopFulfillment;
+  address?: string; // si es despacho
+  comuna?: string;
+  payment: ShopPaymentMethod;
+  items: ShopOrderItem[];
+  subtotal: number;
+  shipping: number;
+  discount: number; // descuento por cupón
+  couponCode?: string;
+  total: number;
+  status: ShopOrderStatus;
+  createdAt: string; // ISO
+  paidAt?: string;
+  shippedAt?: string;
+  deliveredAt?: string;
+  notes?: string;
+}
+
+/** Tipo de cupón de descuento de la tienda. */
+export type CouponType = "porcentaje" | "monto" | "envio_gratis";
+
+/** Cupón de descuento de la tienda online. */
+export interface Coupon {
+  id: string;
+  code: string;
+  type: CouponType;
+  value: number; // % o CLP; 0 si envío gratis
+  minPurchase: number; // compra mínima en CLP (0 = sin mínimo)
+  active: boolean;
+  uses: number; // veces canjeado
+}
+
+/** Ajustes de la tienda online (editables en su Configuración). */
+export interface ShopSettings {
+  storeName: string;
+  contactEmail: string;
+  whatsapp: string; // contacto visible de la tienda
+  shippingCost: number; // costo de despacho en CLP
+  freeShippingThreshold: number; // envío gratis sobre este monto (0 = sin envío gratis)
+  pickupAddress: string; // dirección de retiro en local
+  shippingComunas: string[]; // comunas con reparto a domicilio
+  payments: { webpay: boolean; transferencia: boolean; efectivo: boolean };
+  ageNotice: boolean; // mostrar aviso +18 en la tienda
+  storeOnline: boolean; // tienda activa o en mantención
+  notificationEmails: string[]; // correos que reciben aviso de pedidos
+}
+
 /** Rol de acceso al panel admin (demo). */
 export type Role = "recepcion" | "admin" | "aseo";
+
+/** Área de trabajo del administrador: operación del motel o la tienda online. */
+export type AdminArea = "motel" | "tienda";
 
 /** Ajustes generales del recinto (editables en Configuración). */
 export interface VenueSettings {
@@ -282,7 +364,6 @@ export interface VenueSettings {
   phone: string;
   whatsappDisplay: string;
   ivaPercent: number;
-  denominations: number[]; // billetes/monedas para el arqueo
   notificationEmails: string[];
   lastBackup?: string; // ISO, último respaldo
 }
