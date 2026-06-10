@@ -32,6 +32,10 @@ const tooltipStyle = {
   fontSize: 12,
 };
 
+// Los ítems del tooltip de recharts usan un gris propio por defecto: se fuerza
+// el crema del sistema para que nunca queden oscuros sobre fondo oscuro.
+const tooltipText = { color: "#f4f1ec" };
+
 function ChartCard({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- montaje en cliente para que recharts mida el contenedor
@@ -94,8 +98,7 @@ export default function ReportesTiendaPage() {
               <YAxis hide />
               <Tooltip
                 cursor={{ fill: "rgba(244, 241, 236, 0.04)" }}
-                contentStyle={tooltipStyle}
-                labelStyle={{ color: AXIS }}
+                contentStyle={tooltipStyle} itemStyle={tooltipText} labelStyle={tooltipText}
                 formatter={(value) => [formatCLP(Number(value)), "Ventas"]}
               />
               <Bar dataKey="monto" fill={GOLD} radius={[2, 2, 0, 0]} maxBarSize={28} />
@@ -109,8 +112,7 @@ export default function ReportesTiendaPage() {
               <YAxis hide />
               <Tooltip
                 cursor={{ fill: "rgba(244, 241, 236, 0.04)" }}
-                contentStyle={tooltipStyle}
-                labelStyle={{ color: AXIS }}
+                contentStyle={tooltipStyle} itemStyle={tooltipText} labelStyle={tooltipText}
                 formatter={(value) => [formatCLP(Number(value)), "Ventas"]}
               />
               <Bar dataKey="monto" fill={GOLD} radius={[2, 2, 0, 0]} maxBarSize={40} />
@@ -137,8 +139,7 @@ export default function ReportesTiendaPage() {
                 />
                 <Tooltip
                   cursor={{ fill: "rgba(244, 241, 236, 0.04)" }}
-                  contentStyle={tooltipStyle}
-                  labelStyle={{ color: AXIS }}
+                  contentStyle={tooltipStyle} itemStyle={tooltipText} labelStyle={tooltipText}
                   formatter={(value) => [formatCLP(Number(value)), "Vendido"]}
                 />
                 <Bar dataKey="monto" fill={GOLD} radius={[0, 2, 2, 0]} maxBarSize={16} />
@@ -166,8 +167,7 @@ export default function ReportesTiendaPage() {
                 />
                 <Tooltip
                   cursor={{ fill: "rgba(244, 241, 236, 0.04)" }}
-                  contentStyle={tooltipStyle}
-                  labelStyle={{ color: AXIS }}
+                  contentStyle={tooltipStyle} itemStyle={tooltipText} labelStyle={tooltipText}
                   formatter={(value) => [`${value} unidades`, "Vendidas"]}
                 />
                 <Bar dataKey="qty" fill={AXIS} radius={[0, 2, 2, 0]} maxBarSize={16} />

@@ -1,4 +1,8 @@
-import type { InventoryMovement, Product, Shift } from "@/types";
+import type { InventoryMovement, Product, Shift, ShiftItem } from "@/types";
+
+// ShiftItem vive en @/types (lo comparte el snapshot de cortes archivados);
+// se reexporta aquí para los consumidores existentes.
+export type { ShiftItem };
 
 // Derivados del corte de caja. No se guardan: se calculan desde el turno y los
 // movimientos. Única fuente de verdad para los números que muestra el corte.
@@ -30,14 +34,6 @@ export function ingresosTotales(shift: Shift): number {
 /** Utilidad del turno: ingresos − gastos reales. */
 export function utilidadTurno(shift: Shift): number {
   return ingresosTotales(shift) - shift.expenses.real;
-}
-
-export interface ShiftItem {
-  productId: string;
-  name: string;
-  sku: string;
-  quantity: number;
-  total: number;
 }
 
 /**

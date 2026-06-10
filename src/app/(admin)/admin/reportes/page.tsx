@@ -40,6 +40,10 @@ const tooltipStyle = {
   fontSize: 12,
 };
 
+// Los ítems del tooltip de recharts usan un gris propio por defecto: se fuerza
+// el crema del sistema para que nunca queden oscuros sobre fondo oscuro.
+const tooltipText = { color: "#f4f1ec" };
+
 function ChartCard({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
   // Los gráficos se montan solo en el cliente: recharts necesita medir el contenedor.
   const [mounted, setMounted] = useState(false);
@@ -84,9 +88,10 @@ export default function ReportesPage() {
       })),
     [rooms],
   );
+  // Reportes = lo que pasa AHORA (turno en vivo); Gerencia = tendencias históricas.
 
-  // Reportes es exclusivo de Administración.
-  if (user && user.role !== "admin") {
+  // Reportes es material de Administración y del Dueño (solo lectura).
+  if (user && user.role !== "admin" && user.role !== "dueno") {
     return (
       <div className="mx-auto max-w-md py-16 text-center">
         <span className="kicker text-gold">Reportes</span>
@@ -123,8 +128,7 @@ export default function ReportesPage() {
             <YAxis hide />
             <Tooltip
               cursor={{ fill: "rgba(244, 241, 236, 0.04)" }}
-              contentStyle={tooltipStyle}
-              labelStyle={{ color: AXIS }}
+              contentStyle={tooltipStyle} itemStyle={tooltipText} labelStyle={tooltipText}
               formatter={(value) => [formatCLP(Number(value)), "Ingresos"]}
             />
             <Bar dataKey="monto" radius={[2, 2, 0, 0]} maxBarSize={40}>
@@ -142,8 +146,7 @@ export default function ReportesPage() {
             <YAxis hide />
             <Tooltip
               cursor={{ fill: "rgba(244, 241, 236, 0.04)" }}
-              contentStyle={tooltipStyle}
-              labelStyle={{ color: AXIS }}
+              contentStyle={tooltipStyle} itemStyle={tooltipText} labelStyle={tooltipText}
               formatter={(value) => [formatCLP(Number(value)), "Ingresos"]}
             />
             <Bar dataKey="monto" fill={GOLD} radius={[2, 2, 0, 0]} maxBarSize={48} />
@@ -174,8 +177,7 @@ export default function ReportesPage() {
               />
               <Tooltip
                 cursor={{ fill: "rgba(244, 241, 236, 0.04)" }}
-                contentStyle={tooltipStyle}
-                labelStyle={{ color: AXIS }}
+                contentStyle={tooltipStyle} itemStyle={tooltipText} labelStyle={tooltipText}
                 formatter={(value) => [formatCLP(Number(value)), "Vendido"]}
               />
               <Bar dataKey="monto" fill={GOLD} radius={[0, 2, 2, 0]} maxBarSize={18} />
@@ -190,8 +192,7 @@ export default function ReportesPage() {
             <YAxis hide allowDecimals={false} />
             <Tooltip
               cursor={{ fill: "rgba(244, 241, 236, 0.04)" }}
-              contentStyle={tooltipStyle}
-              labelStyle={{ color: AXIS }}
+              contentStyle={tooltipStyle} itemStyle={tooltipText} labelStyle={tooltipText}
               formatter={(value) => [`${value} habitaciones`, "Cantidad"]}
             />
             <Bar dataKey="n" radius={[2, 2, 0, 0]} maxBarSize={40}>

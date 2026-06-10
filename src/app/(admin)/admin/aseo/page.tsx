@@ -110,6 +110,7 @@ export default function AseoPage() {
   }, []);
 
   const by = user?.name;
+  const actor = user ? { name: user.name, role: user.role } : undefined;
   const pendientes = rooms.filter((r) => r.status === "cleaning" && !r.cleaningStartedAt);
   const proceso = rooms.filter((r) => r.status === "cleaning" && r.cleaningStartedAt);
   const visible = tab === "pendientes" ? pendientes : tab === "proceso" ? proceso : [];
@@ -175,7 +176,7 @@ export default function AseoPage() {
               now={now}
               tab={tab}
               onStart={() => startCleaning(room.id, by)}
-              onFinish={() => finishCleaning(room.id)}
+              onFinish={() => finishCleaning(room.id, actor)}
               onReport={() => {
                 setReporting(room);
                 setNote("");
@@ -207,7 +208,7 @@ export default function AseoPage() {
               size="lg"
               className="w-full"
               onClick={() => {
-                reportMaintenance(reporting.id, note, by);
+                reportMaintenance(reporting.id, note, by, actor);
                 setReporting(null);
               }}
             >

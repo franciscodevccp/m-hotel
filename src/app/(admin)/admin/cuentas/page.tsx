@@ -7,6 +7,7 @@ import { MoneyInput } from "@/components/ui/MoneyInput";
 import { Select } from "@/components/ui/Select";
 import { formatCLP, formatDateTime } from "@/lib/format";
 import { makeId } from "@/lib/id";
+import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { PaymentMethod, Receivable } from "@/types";
@@ -22,6 +23,8 @@ const fieldClass =
 
 export default function CuentasPage() {
   const { receivables, rooms, addReceivable, markReceivablePaid } = useAppStore();
+  const { user } = useSession();
+  const actor = user ? { name: user.name, role: user.role } : undefined;
   const [open, setOpen] = useState(false);
   const [collecting, setCollecting] = useState<Receivable | null>(null);
 
@@ -200,7 +203,7 @@ export default function CuentasPage() {
                     key={m.value}
                     type="button"
                     onClick={() => {
-                      markReceivablePaid(collecting.id, m.value);
+                      markReceivablePaid(collecting.id, m.value, actor);
                       setCollecting(null);
                     }}
                     className="border border-line px-3 py-2.5 text-xs text-muted transition-colors hover:border-gold/70 hover:text-gold"

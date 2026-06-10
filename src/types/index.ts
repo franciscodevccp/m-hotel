@@ -34,6 +34,7 @@ export interface RoomStay {
   duration: Duration;
   total: number;
   guestName?: string;
+  guestRut?: string; // del registro rápido (escaneo de cédula: solo datos, sin imagen)
   checkInAt: string; // ISO
 }
 
@@ -47,6 +48,7 @@ export interface Room {
   cleaningAssignee?: string; // personal de aseo asignado (si esta en limpieza)
   cleaningStartedAt?: string; // ISO, cuando la mucama empezó la limpieza (en proceso)
   cleaningSince?: string; // ISO, cuando la habitación entró a limpieza (espera)
+  branchId?: string;
 }
 
 export type ReservationStatus = "pending" | "confirmed";
@@ -65,6 +67,7 @@ export interface Reservation {
   createdAt: string; // ISO
   arrivalAt?: string; // ISO, hora estimada de llegada elegida por el huésped
   status: ReservationStatus;
+  branchId?: string;
 }
 
 export type PaymentMethod = "cash" | "card" | "transfer";
@@ -76,6 +79,7 @@ export interface Transaction {
   amount: number;
   at: string; // ISO
   user: string; // auditoria mock
+  branchId?: string;
 }
 
 /** Linea del corte: lo contado/registrado (real) vs lo que el sistema esperaba (deber). */
@@ -100,6 +104,26 @@ export interface Shift {
   expenses: CashLine; // gastos del turno
   tipsCash: number; // propina en efectivo
   tipsCard: number; // propina en tarjeta
+  branchId?: string;
+}
+
+/** Artículo vendido en un turno (itemiza el ticket del corte). */
+export interface ShiftItem {
+  productId: string;
+  name: string;
+  sku: string;
+  quantity: number;
+  total: number;
+}
+
+/** Corte cerrado y archivado, con snapshot de su detalle al momento del arqueo. */
+export interface ClosedShift extends Shift {
+  closedAt: string; // ISO del cierre
+  countedCash: number; // efectivo contado en el arqueo
+  countedCard: number; // comprobantes de tarjeta contados
+  transactions: Transaction[]; // snapshot de los pagos del turno
+  expenseList: Expense[]; // snapshot de los gastos del turno
+  items: ShiftItem[]; // artículos vendidos (snapshot del ticket)
 }
 
 export type ExpenseCategory = "insumos" | "mantencion" | "sueldos" | "servicios" | "otro";
@@ -111,6 +135,7 @@ export interface Expense {
   category: ExpenseCategory;
   at: string; // ISO
   user: string;
+  branchId?: string;
 }
 
 /** Categoria de producto del inventario. */
@@ -120,6 +145,7 @@ export type ProductCategory =
   | "sexshop"
   | "amenidad"
   | "carta"
+  | "insumo"
   | "otro";
 
 /** Canal de venta de un producto. */
@@ -133,7 +159,8 @@ export interface Product {
   group?: string; // sub-categoria del catalogo (ej. "Vibradores", "Cócktails")
   price: number; // precio de venta en CLP
   cost?: number; // costo unitario (opcional, para margen)
-  stock: number; // unidades disponibles
+  stock: number; // unidades en bodega de recepción (el stock operativo de venta)
+  centralStock?: number; // unidades en bodega central (bajo llave); undefined = 0
   lowStockThreshold: number; // umbral para alerta de stock bajo
   channels: SalesChannel[]; // donde se vende
   ageRestricted: boolean; // +18 (sexshop)
@@ -158,7 +185,7 @@ export interface Package {
   active: boolean;
 }
 
-export type MovementType = "ingreso" | "venta_presencial" | "venta_online" | "ajuste";
+export type MovementType = "ingreso" | "venta_presencial" | "venta_online" | "ajuste" | "traspaso";
 
 /** Ítem de una lista de compra (ingreso de stock). */
 export interface PurchaseItem {
@@ -175,6 +202,9 @@ export interface Purchase {
   total: number; // monto total de la compra
   at: string; // ISO
   user?: string;
+  /** Bodega de destino del ingreso (central por defecto desde la v2). */
+  warehouseId?: string;
+  branchId?: string;
 }
 
 /** Proveedor del recinto (para el ingreso de stock). */
@@ -385,6 +415,7 @@ export interface ShopOrder {
   shippedAt?: string;
   deliveredAt?: string;
   notes?: string;
+  branchId?: string;
 }
 
 /** Tipo de cupón de descuento de la tienda. */
@@ -417,7 +448,13 @@ export interface ShopSettings {
 }
 
 /** Rol de acceso al panel admin (demo). */
-export type Role = "recepcion" | "admin" | "aseo" | "encargado";
+export type Role = "recepcion" | "admin" | "aseo" | "encargado" | "dueno";
+
+/** Quién ejecuta una acción del store (para la auditoría viva). */
+export interface Actor {
+  name: string;
+  role: Role;
+}
 
 /** Área de trabajo del administrador: operación del motel o la tienda online. */
 export type AdminArea = "motel" | "tienda";
@@ -464,4 +501,74 @@ export interface ReservationDraft {
   duration: Duration | null;
   guestName: string;
   guestPhone: string;
+}
+
+// --- Multi-sucursal (arquitectura preparada desde el día uno) ---
+
+/** Sucursal del grupo. La maqueta opera con Limache; la vista consolidada es fase futura. */
+export interface Branch {
+  id: string;
+  name: string;
+  address: string;
+  active: boolean;
+}
+
+// --- Bodegas y traspasos ---
+
+/** Bodega física del recinto. */
+export interface Warehouse {
+  id: string;
+  name: string;
+  /** true = bajo llave (bodega central). */
+  locked: boolean;
+}
+
+export type TransferStatus = "solicitado" | "entregado" | "recibido" | "rechazado";
+
+export interface TransferItem {
+  productId: string;
+  quantity: number;
+}
+
+/**
+ * Traspaso entre bodegas. Una solicitud de reposición es un traspaso en estado
+ * "solicitado" creado desde recepción; el stock se mueve al entregarse.
+ */
+export interface Transfer {
+  id: string;
+  from: string; // warehouseId origen (central, normalmente)
+  to: string; // warehouseId destino (recepción, normalmente)
+  items: TransferItem[];
+  status: TransferStatus;
+  requestedBy: string; // quién solicita (jefe de turno)
+  deliveredBy?: string; // quién entrega (encargado/admin)
+  receivedBy?: string; // quién confirma recepción
+  note?: string;
+  createdAt: string; // ISO
+  deliveredAt?: string;
+  receivedAt?: string;
+  branchId?: string;
+}
+
+// --- Conteos de inventario ---
+
+export interface StockCountLine {
+  productId: string;
+  expected: number; // saldo según sistema al abrir el conteo
+  counted: number; // lo contado físicamente
+}
+
+/** Conteo de inventario (parcial o general) de una bodega. */
+export interface StockCount {
+  id: string;
+  scope: "parcial" | "general";
+  warehouseId: string; // qué bodega se contó
+  group?: string; // sub-categoría si es parcial
+  lines: StockCountLine[];
+  status: "abierto" | "cerrado";
+  adjusted: boolean; // si al cerrar se ajustó el stock
+  by: string;
+  createdAt: string;
+  closedAt?: string;
+  branchId?: string;
 }

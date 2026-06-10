@@ -18,6 +18,7 @@ const ROLE_LABEL: Record<Role, string> = {
   admin: "Administración",
   aseo: "Aseo",
   encargado: "Encargado",
+  dueno: "Dueño",
 };
 
 const fieldClass =
@@ -53,6 +54,7 @@ export default function ConfiguracionPage() {
     settings,
     users,
     blacklist,
+    branches,
     updateSettings,
     addUser,
     updateUser,
@@ -185,6 +187,33 @@ export default function ConfiguracionPage() {
               />
             </div>
           </div>
+        </Section>
+
+        {/* Sucursales */}
+        <Section
+          title="Sucursales"
+          description="El sistema está preparado para operar múltiples sucursales con administración consolidada."
+          action={
+            <Button variant="secondary" disabled>
+              Agregar sucursal
+            </Button>
+          }
+        >
+          <ul className="divide-y divide-line">
+            {branches.map((branch) => (
+              <li key={branch.id} className="flex items-start justify-between gap-4 py-3">
+                <div>
+                  <p className="text-sm text-cream">{branch.name}</p>
+                  <p className="mt-1 text-xs text-dim">{branch.address}</p>
+                </div>
+                {branch.active && <span className="kicker text-ok">Activa</span>}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-4 text-xs leading-relaxed text-dim">
+            Las sucursales adicionales se habilitan al abrir un nuevo recinto: cada registro del
+            sistema ya viaja con su sucursal de origen.
+          </p>
         </Section>
 
         {/* Impuesto y bloques */}

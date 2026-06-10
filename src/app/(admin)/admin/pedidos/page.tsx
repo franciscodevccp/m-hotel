@@ -17,6 +17,7 @@ import {
   needsAction,
   statusLabelFor,
 } from "@/lib/shop";
+import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { ShopOrder } from "@/types";
@@ -33,6 +34,8 @@ const STATUS_FILTERS: { value: string; label: string }[] = [
 
 export default function PedidosPage() {
   const { shopOrders, advanceShopOrder, cancelShopOrder } = useAppStore();
+  const { user } = useSession();
+  const actor = user ? { name: user.name, role: user.role } : undefined;
   const [statusFilter, setStatusFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -145,8 +148,8 @@ export default function PedidosPage() {
           <OrderDetail
             order={open}
             onClose={() => setOpenId(null)}
-            onAdvance={() => advanceShopOrder(open.id)}
-            onCancel={() => cancelShopOrder(open.id)}
+            onAdvance={() => advanceShopOrder(open.id, actor)}
+            onCancel={() => cancelShopOrder(open.id, actor)}
           />
         )}
       </div>

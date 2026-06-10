@@ -17,6 +17,7 @@ import {
 } from "@/lib/format";
 import { makeId } from "@/lib/id";
 import { DURATIONS, getCategory, priceFor } from "@/lib/pricing";
+import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import type { CategoryId, DayType, Duration, Reservation, ReservationStatus } from "@/types";
 
@@ -76,6 +77,8 @@ function Row({ label, value }: { label: string; value: string }) {
 
 export default function ReservasPage() {
   const { reservations, categories, rooms, addReservation } = useAppStore();
+  const { user } = useSession();
+  const actor = user ? { name: user.name, role: user.role } : undefined;
   const [selected, setSelected] = useState<Reservation | null>(null);
 
   // Carga manual de reserva (lo que más usa recepción).
@@ -131,7 +134,7 @@ export default function ReservasPage() {
       arrivalAt,
       status: "confirmed",
     };
-    addReservation(reservation);
+    addReservation(reservation, actor);
     setNpName("");
     setNpPhone("");
     setNpRut("");

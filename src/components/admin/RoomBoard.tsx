@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { IdScanModal } from "@/components/admin/IdScanModal";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
 import { Modal } from "@/components/ui/Modal";
@@ -8,6 +9,7 @@ import { Select } from "@/components/ui/Select";
 import { SegmentedToggle } from "@/components/ui/SegmentedToggle";
 import { DAY_LABELS, DURATION_LABELS, formatCLP, formatTime } from "@/lib/format";
 import { DURATIONS, getCategory, priceFor } from "@/lib/pricing";
+import { formatRut } from "@/lib/rut";
 import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -38,9 +40,19 @@ const PAY_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "transfer", label: "Transferencia" },
 ];
 
+// Identidades de ejemplo para el escaneo de cédula simulado (determinístico
+// por habitación). El escáner real lee el código de la cédula y entrega solo
+// nombre y RUT — nunca la imagen del documento.
+const SCAN_IDENTITIES: { name: string; rut: string }[] = [
+  { name: "Carolina Mendoza", rut: "16.582.441-7" },
+  { name: "Andrés Fuenzalida", rut: "14.220.873-K" },
+  { name: "Javiera Campos", rut: "18.115.062-3" },
+];
+
 export function RoomBoard() {
   const { rooms, setRoomStatus, checkIn, checkOut, moveRoom, extendStay } = useAppStore();
-  const { user } = useSession();
+  const { user, readOnly } = useSession();
+  const actor = user ? { name: user.name, role: user.role } : undefined;
   const [now, setNow] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<View>("main");
@@ -50,6 +62,8 @@ export function RoomBoard() {
   const [day, setDay] = useState<DayType>("weekday");
   const [duration, setDuration] = useState<Duration | null>(null);
   const [guestName, setGuestName] = useState("");
+  const [guestRut, setGuestRut] = useState("");
+  const [scanOpen, setScanOpen] = useState(false);
   const [payMethod, setPayMethod] = useState<PaymentMethod | "none">("cash");
   const [moveTarget, setMoveTarget] = useState("");
 
@@ -78,8 +92,18 @@ export function RoomBoard() {
     setDay(todayDayType());
     setDuration(null);
     setGuestName("");
+    setGuestRut("");
+    setScanOpen(false);
     setPayMethod("cash");
     setMoveTarget("");
+  }
+
+  /** Respaldo del lector: rellena con una identidad de ejemplo (demo sin carnet). */
+  function fillExampleId(roomNumber: number) {
+    const identity = SCAN_IDENTITIES[roomNumber % SCAN_IDENTITIES.length];
+    setGuestName(identity.name);
+    setGuestRut(identity.rut);
+    setScanOpen(false);
   }
 
   function close() {
@@ -145,6 +169,12 @@ export function RoomBoard() {
                       <dd className="text-sm text-cream">{current.stay.guestName}</dd>
                     </div>
                   )}
+                  {current.stay?.guestRut && (
+                    <div className="flex items-baseline justify-between gap-6">
+                      <dt className="kicker text-dim">RUT</dt>
+                      <dd className="tnum text-sm text-cream">{current.stay.guestRut}</dd>
+                    </div>
+                  )}
                   {current.stay && (
                     <>
                       <div className="flex items-baseline justify-between gap-6">
@@ -171,14 +201,14 @@ export function RoomBoard() {
                 </dl>
               )}
 
-              {/* Acciones contextuales */}
-              {current.status === "available" && (
+              {/* Acciones contextuales (el perfil de solo lectura ve solo la información) */}
+              {!readOnly && current.status === "available" && (
                 <Button className="w-full" onClick={() => setView("checkin")}>
                   Check-in
                 </Button>
               )}
 
-              {current.status === "occupied" && (
+              {!readOnly && current.status === "occupied" && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     <Button onClick={() => setView("checkout")}>Check-out</Button>
@@ -190,14 +220,14 @@ export function RoomBoard() {
                     <span className="kicker text-dim">Ampliar</span>
                     <button
                       type="button"
-                      onClick={() => extendStay(current.id, 1)}
+                      onClick={() => extendStay(current.id, 1, actor)}
                       className="border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:border-gold/70 hover:text-gold"
                     >
                       +1 hora
                     </button>
                     <button
                       type="button"
-                      onClick={() => extendStay(current.id, 3)}
+                      onClick={() => extendStay(current.id, 3, actor)}
                       className="border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:border-gold/70 hover:text-gold"
                     >
                       +3 horas
@@ -206,33 +236,38 @@ export function RoomBoard() {
                 </div>
               )}
 
-              {(current.status === "cleaning" || current.status === "maintenance") && (
-                <Button className="w-full" onClick={() => setRoomStatus(current.id, "available")}>
+              {!readOnly && (current.status === "cleaning" || current.status === "maintenance") && (
+                <Button
+                  className="w-full"
+                  onClick={() => setRoomStatus(current.id, "available", actor)}
+                >
                   Marcar disponible
                 </Button>
               )}
 
               {/* Cambio de estado manual */}
-              <div>
-                <p className="kicker text-dim">Cambiar estado</p>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {ROOM_STATUS_ORDER.map((status) => (
-                    <button
-                      key={status}
-                      type="button"
-                      onClick={() => setRoomStatus(current.id, status)}
-                      className={cn(
-                        "border px-3 py-2.5 text-sm transition-colors",
-                        status === current.status
-                          ? "border-gold/70 text-gold"
-                          : "border-line text-muted hover:border-line-strong hover:text-cream",
-                      )}
-                    >
-                      {ROOM_STATUS[status].label}
-                    </button>
-                  ))}
+              {!readOnly && (
+                <div>
+                  <p className="kicker text-dim">Cambiar estado</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {ROOM_STATUS_ORDER.map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        onClick={() => setRoomStatus(current.id, status, actor)}
+                        className={cn(
+                          "border px-3 py-2.5 text-sm transition-colors",
+                          status === current.status
+                            ? "border-gold/70 text-gold"
+                            : "border-line text-muted hover:border-line-strong hover:text-cream",
+                        )}
+                      >
+                        {ROOM_STATUS[status].label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -267,16 +302,39 @@ export function RoomBoard() {
                 })}
               </div>
               <div>
-                <label className="kicker text-dim" htmlFor="guest">
-                  Huésped (opcional)
-                </label>
-                <input
-                  id="guest"
-                  value={guestName}
-                  onChange={(e) => setGuestName(e.target.value)}
-                  placeholder="Nombre"
-                  className="mt-2 min-h-[44px] w-full rounded-sm border border-line bg-surface px-4 py-2.5 text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none"
-                />
+                <div className="flex items-center justify-between">
+                  <span className="kicker text-dim">Registro del huésped (opcional)</span>
+                  <button
+                    type="button"
+                    onClick={() => setScanOpen(true)}
+                    className="border border-line px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-muted transition-colors hover:border-gold/70 hover:text-gold"
+                  >
+                    Escanear cédula
+                  </button>
+                </div>
+                <div className="mt-2 grid grid-cols-[1.4fr_1fr] gap-2">
+                  <input
+                    id="guest"
+                    value={guestName}
+                    onChange={(e) => setGuestName(e.target.value)}
+                    placeholder="Nombre"
+                    aria-label="Nombre del huésped"
+                    className="min-h-[44px] w-full rounded-sm border border-line bg-surface px-4 py-2.5 text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none"
+                  />
+                  <input
+                    id="guest-rut"
+                    value={guestRut}
+                    onChange={(e) => setGuestRut(formatRut(e.target.value))}
+                    placeholder="RUT"
+                    maxLength={12}
+                    aria-label="RUT del huésped"
+                    className="min-h-[44px] w-full rounded-sm border border-line bg-surface px-4 py-2.5 text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none"
+                  />
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-dim">
+                  El escáner lee el código de la cédula y completa nombre y RUT en un paso. No
+                  se almacenan imágenes del documento.
+                </p>
               </div>
               <div className="flex gap-3">
                 <Button variant="ghost" onClick={() => setView("main")}>
@@ -287,7 +345,7 @@ export function RoomBoard() {
                   disabled={!duration}
                   onClick={() => {
                     if (!duration) return;
-                    checkIn(current.id, day, duration, guestName);
+                    checkIn(current.id, day, duration, guestName, guestRut, actor);
                     close();
                   }}
                 >
@@ -350,7 +408,12 @@ export function RoomBoard() {
                 <Button
                   className="flex-1"
                   onClick={() => {
-                    checkOut(current.id, payMethod === "none" ? undefined : payMethod, userLabel);
+                    checkOut(
+                      current.id,
+                      payMethod === "none" ? undefined : payMethod,
+                      userLabel,
+                      actor,
+                    );
                     close();
                   }}
                 >
@@ -393,7 +456,7 @@ export function RoomBoard() {
                   disabled={!moveTarget}
                   onClick={() => {
                     if (!moveTarget) return;
-                    moveRoom(current.id, moveTarget);
+                    moveRoom(current.id, moveTarget, actor);
                     close();
                   }}
                 >
@@ -403,6 +466,18 @@ export function RoomBoard() {
             </div>
           )}
         </Modal>
+      )}
+
+      {current && scanOpen && (
+        <IdScanModal
+          onResult={({ name, rut }) => {
+            if (name) setGuestName(name);
+            if (rut) setGuestRut(rut);
+            setScanOpen(false);
+          }}
+          onSimulate={() => fillExampleId(current.number)}
+          onClose={() => setScanOpen(false)}
+        />
       )}
     </>
   );

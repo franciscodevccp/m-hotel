@@ -25,6 +25,7 @@ export default function LimpiezaPage() {
   const isAdmin = user?.role === "admin";
   const [now, setNow] = useState<number | null>(null);
   const [empFilter, setEmpFilter] = useState("all");
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- siembra la hora actual al montar (cronómetros en vivo)
@@ -53,6 +54,11 @@ export default function LimpiezaPage() {
   const totalMin = withMin.reduce((s, e) => s + (e.minutes ?? 0), 0);
   const avgMin = withMin.length > 0 ? Math.round(totalMin / withMin.length) : 0;
   const roomNumber = (id: string) => rooms.find((r) => r.id === id)?.number ?? id;
+  // El historial de 30 días supera las 200 entradas: se pagina como el resto.
+  const PAGE_SIZE = 15;
+  const pageCount = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageRows = history.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -138,7 +144,10 @@ export default function LimpiezaPage() {
             <div className="flex items-center gap-3">
               <Select
                 value={empFilter}
-                onValueChange={setEmpFilter}
+                onValueChange={(v) => {
+                  setEmpFilter(v);
+                  setPage(0);
+                }}
                 ariaLabel="Empleado"
                 className="mt-0 w-52"
                 options={[
@@ -173,7 +182,7 @@ export default function LimpiezaPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((e) => (
+                  {pageRows.map((e) => (
                     <tr key={e.id} className="border-b border-line last:border-b-0">
                       <td className="px-5 py-3 text-cream">Habitación {roomNumber(e.roomId)}</td>
                       <td className="px-5 py-3 text-muted">{e.by ?? "—"}</td>
@@ -186,6 +195,30 @@ export default function LimpiezaPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {pageCount > 1 && (
+            <div className="mt-5 flex items-center justify-between">
+              <button
+                type="button"
+                disabled={safePage === 0}
+                onClick={() => setPage(safePage - 1)}
+                className="border border-line px-4 py-2 text-xs uppercase tracking-[0.14em] text-muted transition-colors hover:border-gold/70 hover:text-gold disabled:pointer-events-none disabled:opacity-30"
+              >
+                Anterior
+              </button>
+              <span className="kicker text-dim">
+                Página {safePage + 1} de {pageCount}
+              </span>
+              <button
+                type="button"
+                disabled={safePage >= pageCount - 1}
+                onClick={() => setPage(safePage + 1)}
+                className="border border-line px-4 py-2 text-xs uppercase tracking-[0.14em] text-muted transition-colors hover:border-gold/70 hover:text-gold disabled:pointer-events-none disabled:opacity-30"
+              >
+                Siguiente
+              </button>
             </div>
           )}
         </section>

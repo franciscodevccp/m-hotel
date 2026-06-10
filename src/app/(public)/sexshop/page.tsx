@@ -1,5 +1,6 @@
 "use client";
 
+import { AgeGate } from "@/components/public/AgeGate";
 import { CatalogList } from "@/components/public/CatalogList";
 import { buttonStyles } from "@/components/ui/Button";
 import { useAppStore } from "@/lib/store";
@@ -12,6 +13,7 @@ export default function SexshopPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-5 pb-24 pt-28 sm:px-8 sm:pt-32">
+      <AgeGate />
       <header className="mb-12 max-w-2xl">
         <span className="kicker text-gold">Sexshop · solo +18</span>
         <h1 className="mt-4 font-display text-4xl leading-tight text-cream sm:text-5xl">Sexshop</h1>

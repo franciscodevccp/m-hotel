@@ -4,16 +4,12 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
-import { formatDate, formatDateTime, formatTime } from "@/lib/format";
+import { fmtDuration, formatDate, formatDateTime, formatTime } from "@/lib/format";
 import { useAppStore } from "@/lib/store";
 import type { CleaningLogEntry, Room } from "@/types";
 
-/** Minutos en formato legible. */
-export function fmtDuration(min?: number): string {
-  if (min == null) return "—";
-  if (min < 60) return `${min} min`;
-  return `${Math.floor(min / 60)}h ${min % 60}m`;
-}
+// fmtDuration vive en @/lib/format; se reexporta para los consumidores existentes.
+export { fmtDuration };
 
 /** Botón + modal que genera y descarga el informe de limpiezas (PDF), filtrable por empleado. */
 export function CleaningReportButton({

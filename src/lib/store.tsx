@@ -11,6 +11,7 @@ import {
 import { CATEGORIES } from "@/data/categories";
 import { SEED_ANOMALIES } from "@/data/anomalies";
 import { SEED_AUDIT } from "@/data/audit";
+import { SEED_BRANCHES } from "@/data/branches";
 import { SEED_CLEANING_LOG } from "@/data/cleaning";
 import { SEED_COUPONS } from "@/data/coupons";
 import { freeMachineName, SEED_LAUNDRY, seedLaundryTimes } from "@/data/laundry";
@@ -23,18 +24,28 @@ import { SEED_RECEIVABLES } from "@/data/receivables";
 import { SEED_RESERVATIONS } from "@/data/reservations";
 import { SEED_ROOM_SERVICE } from "@/data/roomService";
 import { SEED_SHOP_ORDERS } from "@/data/shopOrders";
+import { SEED_STOCK_COUNTS } from "@/data/stockCounts";
+import { SEED_TRANSFERS } from "@/data/transfers";
+import { WAREHOUSES, warehouseName } from "@/data/warehouses";
 import { DEFAULT_SHOP_SETTINGS } from "@/data/shopSettings";
 import { ROOMS, SEED_OCCUPIED_MINUTES } from "@/data/rooms";
 import { DEFAULT_SETTINGS, SEED_BLACKLIST, SEED_USERS } from "@/data/settings";
 import { SEED_EXPENSES, SEED_SHIFT, SEED_TRANSACTIONS } from "@/data/shifts";
+import { shiftItems } from "@/lib/cash";
+import { formatCLP } from "@/lib/format";
 import { makeId } from "@/lib/id";
 import { extraHourFor, priceFor } from "@/lib/pricing";
 import { SHOP_NEXT } from "@/lib/shop";
 import type {
+  Actor,
   Anomaly,
   AuditEntry,
+  AuditType,
   BlacklistEntry,
+  Branch,
+  CashLine,
   Category,
+  ClosedShift,
   CleaningLogEntry,
   Coupon,
   DayType,
@@ -63,11 +74,58 @@ import type {
   ShopOrder,
   ShopSettings,
   StaffUser,
+  StockCount,
   Transaction,
+  Transfer,
+  TransferItem,
   VenueSettings,
+  Warehouse,
 } from "@/types";
 
-const STORAGE_KEY = "m-motel-state-v12";
+const STORAGE_KEY = "m-motel-state-v13";
+
+/** Suma a ambas líneas del corte: lo registrado por el sistema es lo que debería
+ * haber (deber) y, con el turno abierto, se asume que también está (real). La
+ * diferencia solo nace en el arqueo del cierre. */
+function addToLine(line: CashLine, amount: number): CashLine {
+  return { real: line.real + amount, expected: line.expected + amount };
+}
+
+const PAYMENT_LABEL: Record<PaymentMethod, string> = {
+  cash: "Efectivo",
+  card: "Tarjeta",
+  transfer: "Transferencia",
+};
+
+const ROOM_STATUS_LABEL: Record<RoomStatus, string> = {
+  available: "Disponible",
+  occupied: "Ocupada",
+  cleaning: "Limpieza",
+  maintenance: "Mantención",
+};
+
+let auditSeq = 0;
+
+/** Entrada de auditoría de una acción del panel (la audita quien la ejecuta). */
+function auditEntry(
+  type: AuditType,
+  action: string,
+  module: string,
+  target?: string,
+  actor?: Actor,
+): AuditEntry {
+  auditSeq += 1;
+  return {
+    id: `${makeId("au")}-${auditSeq}`,
+    type,
+    action,
+    target,
+    module,
+    at: new Date().toISOString(),
+    userName: actor?.name ?? "Sistema",
+    userRole: actor?.role ?? "recepcion",
+  };
+}
 
 interface AppState {
   reservations: Reservation[];
@@ -75,6 +133,8 @@ interface AppState {
   rooms: Room[];
   transactions: Transaction[];
   shift: Shift;
+  /** Cortes cerrados y archivados (el más reciente primero). */
+  pastShifts: ClosedShift[];
   expenses: Expense[];
   products: Product[];
   movements: InventoryMovement[];
@@ -99,27 +159,65 @@ interface AppState {
   audit: AuditEntry[];
   linens: LinenStock[];
   linenIncidents: LinenIncident[];
+  branches: Branch[];
+  warehouses: Warehouse[];
+  transfers: Transfer[];
+  stockCounts: StockCount[];
+}
+
+/**
+ * Mueve los ítems de un traspaso entre bodegas. Si el origen no alcanza para
+ * una línea, la cantidad se recorta al saldo disponible (regla de maqueta) y
+ * queda anotado. Devuelve los productos actualizados y lo realmente movido.
+ */
+function applyTransferToProducts(
+  products: Product[],
+  items: TransferItem[],
+  from: string,
+): { products: Product[]; moved: TransferItem[]; shortages: string[] } {
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const moved: TransferItem[] = [];
+  const shortages: string[] = [];
+  for (const item of items) {
+    const product = byId.get(item.productId);
+    if (!product || item.quantity <= 0) continue;
+    const available = from === "central" ? (product.centralStock ?? 0) : product.stock;
+    const quantity = Math.min(item.quantity, Math.max(0, available));
+    moved.push({ productId: item.productId, quantity });
+    if (quantity < item.quantity) {
+      shortages.push(`${product.name} (${quantity} de ${item.quantity})`);
+    }
+  }
+  const movedById = new Map(moved.map((m) => [m.productId, m.quantity]));
+  const updated = products.map((p) => {
+    const quantity = movedById.get(p.id);
+    if (!quantity) return p;
+    return from === "central"
+      ? { ...p, centralStock: (p.centralStock ?? 0) - quantity, stock: p.stock + quantity }
+      : { ...p, stock: p.stock - quantity, centralStock: (p.centralStock ?? 0) + quantity };
+  });
+  return { products: updated, moved, shortages };
 }
 
 interface AppStore extends AppState {
   /** true una vez leído localStorage en el cliente. */
   hydrated: boolean;
-  addReservation: (reservation: Reservation) => void;
+  addReservation: (reservation: Reservation, actor?: Actor) => void;
   /** Actualiza las tarifas (y datos) de una categoría. Es la fuente del booking. */
-  updateCategory: (category: Category) => void;
-  setRoomStatus: (roomId: string, status: RoomStatus) => void;
+  updateCategory: (category: Category, actor?: Actor) => void;
+  setRoomStatus: (roomId: string, status: RoomStatus, actor?: Actor) => void;
   /** Asigna (o reasigna) el personal de aseo a una habitación en limpieza. */
   assignCleaning: (roomId: string, staff: string) => void;
   /** Aseo empieza la limpieza de una habitación (queda "en proceso"). */
   startCleaning: (roomId: string, by?: string) => void;
   /** Aseo marca la habitación lista: pasa a disponible y registra la limpieza. */
-  finishCleaning: (roomId: string) => void;
+  finishCleaning: (roomId: string, actor?: Actor) => void;
   /** Aseo reporta mantención: la habitación pasa a mantención y deja una incidencia. */
-  reportMaintenance: (roomId: string, note?: string, by?: string) => void;
+  reportMaintenance: (roomId: string, note?: string, by?: string, actor?: Actor) => void;
   /** Registra una anomalía/incidente del turno. */
-  addAnomaly: (anomaly: Anomaly) => void;
+  addAnomaly: (anomaly: Anomaly, actor?: Actor) => void;
   /** Marca una anomalía como resuelta. */
-  resolveAnomaly: (id: string) => void;
+  resolveAnomaly: (id: string, actor?: Actor) => void;
   /** Crea una carga de lavado (recolectada). */
   addLaundryLoad: (load: LaundryLoad) => void;
   /** Avanza la carga por sus etapas y asigna máquina (lavadora/secadora). */
@@ -131,24 +229,31 @@ interface AppStore extends AppState {
   /** Crea una cuenta por cobrar. */
   addReceivable: (receivable: Receivable) => void;
   /** Marca una cuenta como pagada; el monto entra al corte del turno. */
-  markReceivablePaid: (id: string, method: PaymentMethod) => void;
+  markReceivablePaid: (id: string, method: PaymentMethod, actor?: Actor) => void;
   /** Crea un pedido de room service (queda en preparación). */
   addRoomServiceOrder: (order: RoomServiceOrder) => void;
   /** Entrega el pedido: baja stock de cada ítem y cobra el total al corte. */
-  deliverRoomServiceOrder: (id: string, user?: string) => void;
+  deliverRoomServiceOrder: (id: string, user?: string, actor?: Actor) => void;
   /** Cancela un pedido en preparación. */
   cancelRoomServiceOrder: (id: string) => void;
   /** Check-in: ocupa la habitación con un bloque y registra la estancia. */
-  checkIn: (roomId: string, dayType: DayType, duration: Duration, guestName?: string) => void;
+  checkIn: (
+    roomId: string,
+    dayType: DayType,
+    duration: Duration,
+    guestName?: string,
+    guestRut?: string,
+    actor?: Actor,
+  ) => void;
   /** Check-out: libera la habitación (queda en limpieza) y opcionalmente cobra la estancia. */
-  checkOut: (roomId: string, method?: PaymentMethod, user?: string) => void;
+  checkOut: (roomId: string, method?: PaymentMethod, user?: string, actor?: Actor) => void;
   /** Cambio de pieza: traslada la estancia en curso a otra habitación disponible. */
-  moveRoom: (fromId: string, toId: string) => void;
+  moveRoom: (fromId: string, toId: string, actor?: Actor) => void;
   /** Ampliar estancia: extiende el término y suma la hora adicional al total. */
-  extendStay: (roomId: string, extraHours: number) => void;
-  addTransaction: (transaction: Transaction) => void;
-  /** Registra un gasto del turno: lo suma a expenses.real (baja la utilidad). */
-  addExpense: (expense: Expense) => void;
+  extendStay: (roomId: string, extraHours: number, actor?: Actor) => void;
+  addTransaction: (transaction: Transaction, actor?: Actor) => void;
+  /** Registra un gasto del turno: entra a la línea de gastos del corte. */
+  addExpense: (expense: Expense, actor?: Actor) => void;
   /**
    * Vende un producto: baja stock y deja un movimiento de inventario. Si el canal
    * es presencial, suma el monto al efectivo del turno (entra al corte de caja).
@@ -159,15 +264,16 @@ interface AppStore extends AppState {
     channel: SalesChannel,
     refId?: string,
     user?: string,
+    actor?: Actor,
   ) => void;
   /** Ajuste manual de stock (+/-): deja un movimiento de ingreso o ajuste. */
-  adjustStock: (productId: string, delta: number, user?: string) => void;
-  addProduct: (product: Product) => void;
-  updateProduct: (product: Product) => void;
+  adjustStock: (productId: string, delta: number, user?: string, actor?: Actor) => void;
+  addProduct: (product: Product, actor?: Actor) => void;
+  updateProduct: (product: Product, actor?: Actor) => void;
   addPackage: (pkg: Package) => void;
   updatePackage: (pkg: Package) => void;
   /** Vende un paquete: baja el stock de cada ítem y cobra el combo al corte. */
-  sellPackage: (packageId: string, user?: string) => void;
+  sellPackage: (packageId: string, user?: string, actor?: Actor) => void;
   addDiscount: (discount: Discount) => void;
   updateDiscount: (discount: Discount) => void;
   addPromotion: (promotion: Promotion) => void;
@@ -182,9 +288,9 @@ interface AppStore extends AppState {
   /** Crea un pedido en la tienda online (checkout público). */
   addShopOrder: (order: ShopOrder) => void;
   /** Avanza el estado de un pedido de la tienda online (pendiente→…→entregado). */
-  advanceShopOrder: (id: string) => void;
+  advanceShopOrder: (id: string, actor?: Actor) => void;
   /** Cancela un pedido de la tienda online (si no está entregado/cancelado). */
-  cancelShopOrder: (id: string) => void;
+  cancelShopOrder: (id: string, actor?: Actor) => void;
   /** Crea un cupón de descuento de la tienda. */
   addCoupon: (coupon: Coupon) => void;
   /** Actualiza un cupón (datos o activación). */
@@ -192,11 +298,50 @@ interface AppStore extends AppState {
   /** Actualiza los ajustes de la tienda online. */
   updateShopSettings: (patch: Partial<ShopSettings>) => void;
   /** Registra un ingreso de stock (lista de compra): sube stock y deja movimientos. */
-  addPurchase: (purchase: Purchase) => void;
+  addPurchase: (purchase: Purchase, actor?: Actor) => void;
   /** Agrega un proveedor (con RUT) a la lista. */
   addProvider: (provider: Provider) => void;
   /** Agrega una categoría de producto a la lista. */
   addProductCategory: (name: string) => void;
+  /**
+   * Cierra el turno con arqueo: archiva el corte con sus snapshots, fija el real
+   * definitivo en lo contado y abre el folio siguiente con la caja inicial dada.
+   */
+  closeShift: (
+    counted: { cash: number; card: number },
+    nextOpeningCash: number,
+    user?: string,
+    actor?: Actor,
+  ) => void;
+  /** Recepción solicita reposición a bodega central (central → recepción). */
+  requestTransfer: (items: TransferItem[], requestedBy: string, note?: string, actor?: Actor) => void;
+  /** Encargado/Admin crea un traspaso directo ya entregado (cualquier dirección). */
+  createDirectTransfer: (
+    from: string,
+    to: string,
+    items: TransferItem[],
+    deliveredBy: string,
+    actor?: Actor,
+  ) => void;
+  /** Entrega una solicitud pendiente: mueve el stock y registra los movimientos. */
+  deliverTransfer: (id: string, deliveredBy: string, actor?: Actor) => void;
+  /** Recepción confirma que recibió conforme (cierra el ciclo, no mueve stock). */
+  receiveTransfer: (id: string, receivedBy: string, actor?: Actor) => void;
+  /** Rechaza una solicitud pendiente con motivo (no mueve stock). */
+  rejectTransfer: (id: string, by: string, note?: string, actor?: Actor) => void;
+  /** Abre un conteo de inventario y retorna su id (las líneas parten cuadradas). */
+  startStockCount: (
+    warehouseId: string,
+    group: string | undefined,
+    by: string,
+    actor?: Actor,
+  ) => string;
+  /** Registra lo contado físicamente en una línea del conteo. */
+  setCountLine: (countId: string, productId: string, counted: number) => void;
+  /** Cierra el conteo; con ajuste, corrige los saldos y deja movimientos de ajuste. */
+  closeStockCount: (countId: string, applyAdjustment: boolean, actor?: Actor) => void;
+  /** Registra un inicio de sesión en la auditoría. */
+  logAccess: (actor: Actor, detail?: string) => void;
   resetDemo: () => void;
 }
 
@@ -210,6 +355,7 @@ function seedState(): AppState {
     rooms: ROOMS,
     transactions: SEED_TRANSACTIONS,
     shift: SEED_SHIFT,
+    pastShifts: [],
     expenses: SEED_EXPENSES,
     products: SEED_PRODUCTS,
     movements: SEED_MOVEMENTS,
@@ -234,6 +380,10 @@ function seedState(): AppState {
     audit: SEED_AUDIT,
     linens: LINEN_STOCK,
     linenIncidents: SEED_LINEN_INCIDENTS,
+    branches: SEED_BRANCHES,
+    warehouses: WAREHOUSES,
+    transfers: SEED_TRANSFERS,
+    stockCounts: SEED_STOCK_COUNTS,
   };
 }
 
@@ -276,6 +426,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           rooms: parsed.rooms ?? prev.rooms,
           transactions: parsed.transactions ?? prev.transactions,
           shift: parsed.shift ?? prev.shift,
+          pastShifts: parsed.pastShifts ?? prev.pastShifts,
           expenses: parsed.expenses ?? prev.expenses,
           products: parsed.products ?? prev.products,
           movements: parsed.movements ?? prev.movements,
@@ -300,6 +451,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           audit: parsed.audit ?? prev.audit,
           linens: parsed.linens ?? prev.linens,
           linenIncidents: parsed.linenIncidents ?? prev.linenIncidents,
+          branches: parsed.branches ?? prev.branches,
+          warehouses: parsed.warehouses ?? prev.warehouses,
+          transfers: parsed.transfers ?? prev.transfers,
+          stockCounts: parsed.stockCounts ?? prev.stockCounts,
         }));
       } else {
         setState((prev) => ({
@@ -324,20 +479,50 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }
   }, [state, hydrated]);
 
-  const addReservation = useCallback((reservation: Reservation) => {
-    setState((prev) => ({ ...prev, reservations: [reservation, ...prev.reservations] }));
+  const addReservation = useCallback((reservation: Reservation, actor?: Actor) => {
+    setState((prev) => {
+      const category = prev.categories.find((c) => c.id === reservation.categoryId);
+      return {
+        ...prev,
+        reservations: [reservation, ...prev.reservations],
+        audit: [
+          auditEntry(
+            "crear",
+            "Registró una reserva",
+            "Reservas",
+            `${category?.shortName ?? reservation.categoryId} · ${reservation.guestName}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
+      };
+    });
   }, []);
 
-  const updateCategory = useCallback((category: Category) => {
+  const updateCategory = useCallback((category: Category, actor?: Actor) => {
     setState((prev) => ({
       ...prev,
       categories: prev.categories.map((c) => (c.id === category.id ? category : c)),
+      audit: [
+        auditEntry("editar", "Actualizó tarifas", "Precios", `Categoría ${category.shortName}`, actor),
+        ...prev.audit,
+      ],
     }));
   }, []);
 
-  const setRoomStatus = useCallback((roomId: string, status: RoomStatus) => {
+  const setRoomStatus = useCallback((roomId: string, status: RoomStatus, actor?: Actor) => {
     setState((prev) => ({
       ...prev,
+      audit: [
+        auditEntry(
+          "estado",
+          "Cambió el estado de una habitación",
+          "Habitaciones",
+          `Habitación ${prev.rooms.find((r) => r.id === roomId)?.number ?? roomId} → ${ROOM_STATUS_LABEL[status]}`,
+          actor,
+        ),
+        ...prev.audit,
+      ],
       rooms: prev.rooms.map((room) =>
         room.id === roomId
           ? {
@@ -383,7 +568,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const finishCleaning = useCallback((roomId: string) => {
+  const finishCleaning = useCallback((roomId: string, actor?: Actor) => {
     setState((prev) => {
       const room = prev.rooms.find((r) => r.id === roomId);
       if (!room) return prev;
@@ -411,11 +596,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             : r,
         ),
         cleaningLog: [entry, ...prev.cleaningLog],
+        audit: [
+          auditEntry(
+            "estado",
+            "Terminó una limpieza",
+            "Limpieza",
+            `Habitación ${room.number}${minutes != null ? ` · ${minutes} min` : ""}`,
+            actor ?? (room.cleaningAssignee ? { name: room.cleaningAssignee, role: "aseo" } : undefined),
+          ),
+          ...prev.audit,
+        ],
       };
     });
   }, []);
 
-  const reportMaintenance = useCallback((roomId: string, note?: string, by?: string) => {
+  const reportMaintenance = useCallback((roomId: string, note?: string, by?: string, actor?: Actor) => {
     setState((prev) => {
       const report: MaintenanceReport = {
         id: makeId("mr"),
@@ -440,19 +635,61 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             : r,
         ),
         maintenanceReports: [report, ...prev.maintenanceReports],
+        audit: [
+          auditEntry(
+            "estado",
+            "Reportó mantención",
+            "Limpieza",
+            `Habitación ${prev.rooms.find((r) => r.id === roomId)?.number ?? roomId}`,
+            actor ?? (by ? { name: by, role: "aseo" } : undefined),
+          ),
+          ...prev.audit,
+        ],
       };
     });
   }, []);
 
-  const addAnomaly = useCallback((anomaly: Anomaly) => {
-    setState((prev) => ({ ...prev, anomalies: [anomaly, ...prev.anomalies] }));
-  }, []);
-
-  const resolveAnomaly = useCallback((id: string) => {
+  const addAnomaly = useCallback((anomaly: Anomaly, actor?: Actor) => {
     setState((prev) => ({
       ...prev,
-      anomalies: prev.anomalies.map((a) => (a.id === id ? { ...a, status: "resuelta" } : a)),
+      anomalies: [anomaly, ...prev.anomalies],
+      audit: [
+        auditEntry(
+          "crear",
+          "Registró una anomalía",
+          "Anomalías",
+          anomaly.description.length > 60
+            ? `${anomaly.description.slice(0, 57)}…`
+            : anomaly.description,
+          actor,
+        ),
+        ...prev.audit,
+      ],
     }));
+  }, []);
+
+  const resolveAnomaly = useCallback((id: string, actor?: Actor) => {
+    setState((prev) => {
+      const anomaly = prev.anomalies.find((a) => a.id === id);
+      return {
+        ...prev,
+        anomalies: prev.anomalies.map((a) => (a.id === id ? { ...a, status: "resuelta" } : a)),
+        audit: anomaly
+          ? [
+              auditEntry(
+                "estado",
+                "Resolvió una anomalía",
+                "Anomalías",
+                anomaly.description.length > 60
+                  ? `${anomaly.description.slice(0, 57)}…`
+                  : anomaly.description,
+                actor,
+              ),
+              ...prev.audit,
+            ]
+          : prev.audit,
+      };
+    });
   }, []);
 
   const addLaundryLoad = useCallback((load: LaundryLoad) => {
@@ -502,7 +739,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, receivables: [receivable, ...prev.receivables] }));
   }, []);
 
-  const markReceivablePaid = useCallback((id: string, method: PaymentMethod) => {
+  const markReceivablePaid = useCallback((id: string, method: PaymentMethod, actor?: Actor) => {
     setState((prev) => {
       const receivable = prev.receivables.find((c) => c.id === id);
       if (!receivable || receivable.status === "pagada") return prev;
@@ -514,8 +751,18 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         ),
         shift: {
           ...prev.shift,
-          [line]: { ...prev.shift[line], real: prev.shift[line].real + receivable.amount },
+          [line]: addToLine(prev.shift[line], receivable.amount),
         },
+        audit: [
+          auditEntry(
+            "estado",
+            "Cobró una cuenta pendiente",
+            "Cuentas",
+            `${receivable.customer} · ${formatCLP(receivable.amount)}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
       };
     });
   }, []);
@@ -524,7 +771,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, roomService: [order, ...prev.roomService] }));
   }, []);
 
-  const deliverRoomServiceOrder = useCallback((id: string, user?: string) => {
+  const deliverRoomServiceOrder = useCallback((id: string, user?: string, actor?: Actor) => {
     setState((prev) => {
       const order = prev.roomService.find((o) => o.id === id);
       if (!order || order.status !== "preparando") return prev;
@@ -540,17 +787,27 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       const products = prev.products.map((p) => {
         const item = order.items.find((it) => it.productId === p.id);
-        return item ? { ...p, stock: p.stock - item.quantity } : p;
+        return item ? { ...p, stock: Math.max(0, p.stock - item.quantity) } : p;
       });
       return {
         ...prev,
         products,
         movements: [...movements, ...prev.movements],
         // El pedido entregado se cobra al efectivo del corte del turno.
-        shift: { ...prev.shift, cash: { ...prev.shift.cash, real: prev.shift.cash.real + order.total } },
+        shift: { ...prev.shift, cash: addToLine(prev.shift.cash, order.total) },
         roomService: prev.roomService.map((o) =>
           o.id === id ? { ...o, status: "entregado", deliveredAt: at } : o,
         ),
+        audit: [
+          auditEntry(
+            "estado",
+            "Entregó un pedido a la habitación",
+            "Room service",
+            `Habitación ${order.roomId} · ${formatCLP(order.total)}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
       };
     });
   }, []);
@@ -565,7 +822,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const checkIn = useCallback(
-    (roomId: string, dayType: DayType, duration: Duration, guestName?: string) => {
+    (
+      roomId: string,
+      dayType: DayType,
+      duration: Duration,
+      guestName?: string,
+      guestRut?: string,
+      actor?: Actor,
+    ) => {
       setState((prev) => {
         const room = prev.rooms.find((r) => r.id === roomId);
         if (!room) return prev;
@@ -587,18 +851,30 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
                     duration,
                     total,
                     guestName: guestName?.trim() || undefined,
+                    guestRut: guestRut?.trim() || undefined,
                     checkInAt: checkInAt.toISOString(),
                   },
                 }
               : r,
           ),
+          audit: [
+            auditEntry(
+              "estado",
+              "Hizo un check-in",
+              "Habitaciones",
+              `Habitación ${room.number} · ${duration} h`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
         };
       });
     },
     [],
   );
 
-  const checkOut = useCallback((roomId: string, method?: PaymentMethod, user?: string) => {
+  const checkOut = useCallback(
+    (roomId: string, method?: PaymentMethod, user?: string, actor?: Actor) => {
     setState((prev) => {
       const room = prev.rooms.find((r) => r.id === roomId);
       if (!room) return prev;
@@ -613,15 +889,30 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           amount: room.stay.total,
           at: new Date().toISOString(),
           user: user ?? prev.shift.user,
+          branchId: "limache",
         };
         const line = method === "cash" ? "cash" : "card";
         transactions = [tx, ...transactions];
-        shift = { ...shift, [line]: { ...shift[line], real: shift[line].real + tx.amount } };
+        shift = { ...shift, [line]: addToLine(shift[line], tx.amount) };
       }
+      const cobro =
+        method && room.stay && room.stay.total > 0
+          ? ` · cobro ${formatCLP(room.stay.total)} ${PAYMENT_LABEL[method].toLowerCase()}`
+          : "";
       return {
         ...prev,
         transactions,
         shift,
+        audit: [
+          auditEntry(
+            "estado",
+            "Hizo un check-out",
+            "Habitaciones",
+            `Habitación ${room.number}${cobro}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
         rooms: prev.rooms.map((r) =>
           r.id === roomId
             ? {
@@ -639,13 +930,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const moveRoom = useCallback((fromId: string, toId: string) => {
+  const moveRoom = useCallback((fromId: string, toId: string, actor?: Actor) => {
     setState((prev) => {
       const from = prev.rooms.find((r) => r.id === fromId);
       const to = prev.rooms.find((r) => r.id === toId);
       if (!from || !to || to.status !== "available") return prev;
       return {
         ...prev,
+        audit: [
+          auditEntry("estado", "Cambió de pieza una estancia", "Habitaciones", `${from.number} → ${to.number}`, actor),
+          ...prev.audit,
+        ],
         rooms: prev.rooms.map((r) => {
           if (r.id === fromId)
             return {
@@ -663,7 +958,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const extendStay = useCallback((roomId: string, extraHours: number) => {
+  const extendStay = useCallback((roomId: string, extraHours: number, actor?: Actor) => {
     setState((prev) => {
       const room = prev.rooms.find((r) => r.id === roomId);
       if (!room || !room.occupiedUntil || extraHours <= 0) return prev;
@@ -683,11 +978,21 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
               }
             : r,
         ),
+        audit: [
+          auditEntry(
+            "estado",
+            "Amplió una estancia",
+            "Habitaciones",
+            `Habitación ${room.number} · +${extraHours} h`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
       };
     });
   }, []);
 
-  const addTransaction = useCallback((transaction: Transaction) => {
+  const addTransaction = useCallback((transaction: Transaction, actor?: Actor) => {
     setState((prev) => {
       // Efectivo entra al efectivo del corte; tarjeta y transferencia, a tarjeta.
       const line = transaction.method === "cash" ? "cash" : "card";
@@ -696,20 +1001,40 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         transactions: [transaction, ...prev.transactions],
         shift: {
           ...prev.shift,
-          [line]: { ...prev.shift[line], real: prev.shift[line].real + transaction.amount },
+          [line]: addToLine(prev.shift[line], transaction.amount),
         },
+        audit: [
+          auditEntry(
+            "crear",
+            "Registró un pago",
+            "Caja",
+            `${PAYMENT_LABEL[transaction.method]} · ${formatCLP(transaction.amount)} · Hab. ${transaction.roomId}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
       };
     });
   }, []);
 
-  const addExpense = useCallback((expense: Expense) => {
+  const addExpense = useCallback((expense: Expense, actor?: Actor) => {
     setState((prev) => ({
       ...prev,
       expenses: [expense, ...prev.expenses],
       shift: {
         ...prev.shift,
-        expenses: { ...prev.shift.expenses, real: prev.shift.expenses.real + expense.amount },
+        expenses: addToLine(prev.shift.expenses, expense.amount),
       },
+      audit: [
+        auditEntry(
+          "crear",
+          "Registró un gasto",
+          "Caja",
+          `${expense.concept} · ${formatCLP(expense.amount)}`,
+          actor,
+        ),
+        ...prev.audit,
+      ],
     }));
   }, []);
 
@@ -720,6 +1045,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       channel: SalesChannel,
       refId?: string,
       user?: string,
+      actor?: Actor,
     ) => {
       setState((prev) => {
         const product = prev.products.find((p) => p.id === productId);
@@ -737,22 +1063,34 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         const saleAmount = product.price * quantity;
         const shift =
           channel === "presencial"
-            ? { ...prev.shift, cash: { ...prev.shift.cash, real: prev.shift.cash.real + saleAmount } }
+            ? { ...prev.shift, cash: addToLine(prev.shift.cash, saleAmount) }
             : prev.shift;
         return {
           ...prev,
+          // El stock nunca queda negativo: vender sin saldo es justo lo que el
+          // sistema viene a impedir (el Excel del cliente acumulaba negativos).
           products: prev.products.map((p) =>
-            p.id === productId ? { ...p, stock: p.stock - quantity } : p,
+            p.id === productId ? { ...p, stock: Math.max(0, p.stock - quantity) } : p,
           ),
           movements: [movement, ...prev.movements],
           shift,
+          audit: [
+            auditEntry(
+              "crear",
+              channel === "online" ? "Registró una venta online" : "Registró una venta",
+              "Caja",
+              `${quantity}× ${product.name} · ${formatCLP(saleAmount)}`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
         };
       });
     },
     [],
   );
 
-  const adjustStock = useCallback((productId: string, delta: number, user?: string) => {
+  const adjustStock = useCallback((productId: string, delta: number, user?: string, actor?: Actor) => {
     setState((prev) => {
       const product = prev.products.find((p) => p.id === productId);
       if (!product || delta === 0) return prev;
@@ -770,18 +1108,33 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           p.id === productId ? { ...p, stock: Math.max(0, p.stock + delta) } : p,
         ),
         movements: [movement, ...prev.movements],
+        audit: [
+          auditEntry(
+            "editar",
+            "Ajustó stock",
+            "Inventario",
+            `${product.name} · ${delta > 0 ? "+" : ""}${delta}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
       };
     });
   }, []);
 
-  const addProduct = useCallback((product: Product) => {
-    setState((prev) => ({ ...prev, products: [product, ...prev.products] }));
+  const addProduct = useCallback((product: Product, actor?: Actor) => {
+    setState((prev) => ({
+      ...prev,
+      products: [product, ...prev.products],
+      audit: [auditEntry("crear", "Creó un producto", "Inventario", product.name, actor), ...prev.audit],
+    }));
   }, []);
 
-  const updateProduct = useCallback((product: Product) => {
+  const updateProduct = useCallback((product: Product, actor?: Actor) => {
     setState((prev) => ({
       ...prev,
       products: prev.products.map((p) => (p.id === product.id ? product : p)),
+      audit: [auditEntry("editar", "Editó un producto", "Inventario", product.name, actor), ...prev.audit],
     }));
   }, []);
 
@@ -796,7 +1149,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const sellPackage = useCallback((packageId: string, user?: string) => {
+  const sellPackage = useCallback((packageId: string, user?: string, actor?: Actor) => {
     setState((prev) => {
       const pkg = prev.packages.find((p) => p.id === packageId);
       if (!pkg) return prev;
@@ -812,14 +1165,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }));
       const products = prev.products.map((p) => {
         const item = pkg.items.find((it) => it.productId === p.id);
-        return item ? { ...p, stock: p.stock - item.quantity } : p;
+        return item ? { ...p, stock: Math.max(0, p.stock - item.quantity) } : p;
       });
       return {
         ...prev,
         products,
         movements: [...movements, ...prev.movements],
         // El combo se cobra al precio del paquete y entra al efectivo del corte.
-        shift: { ...prev.shift, cash: { ...prev.shift.cash, real: prev.shift.cash.real + pkg.price } },
+        shift: { ...prev.shift, cash: addToLine(prev.shift.cash, pkg.price) },
+        audit: [
+          auditEntry(
+            "crear",
+            "Vendió un paquete",
+            "Caja",
+            `${pkg.name} · ${formatCLP(pkg.price)}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
       };
     });
   }, []);
@@ -880,34 +1243,60 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, shopOrders: [order, ...prev.shopOrders] }));
   }, []);
 
-  const advanceShopOrder = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      shopOrders: prev.shopOrders.map((o) => {
-        if (o.id !== id) return o;
-        const next = SHOP_NEXT[o.status];
-        if (!next) return o;
-        const at = new Date().toISOString();
-        return {
-          ...o,
-          status: next,
-          paidAt: next === "pagado" ? at : o.paidAt,
-          shippedAt: next === "despachado" ? at : o.shippedAt,
-          deliveredAt: next === "entregado" ? at : o.deliveredAt,
-        };
-      }),
-    }));
+  const advanceShopOrder = useCallback((id: string, actor?: Actor) => {
+    setState((prev) => {
+      const order = prev.shopOrders.find((o) => o.id === id);
+      const next = order ? SHOP_NEXT[order.status] : null;
+      return {
+        ...prev,
+        shopOrders: prev.shopOrders.map((o) => {
+          if (o.id !== id) return o;
+          if (!next) return o;
+          const at = new Date().toISOString();
+          return {
+            ...o,
+            status: next,
+            paidAt: next === "pagado" ? at : o.paidAt,
+            shippedAt: next === "despachado" ? at : o.shippedAt,
+            deliveredAt: next === "entregado" ? at : o.deliveredAt,
+          };
+        }),
+        audit:
+          order && next
+            ? [
+                auditEntry(
+                  "estado",
+                  "Avanzó un pedido de la tienda",
+                  "Tienda online",
+                  `#${order.folio} → ${next.charAt(0).toUpperCase()}${next.slice(1)}`,
+                  actor,
+                ),
+                ...prev.audit,
+              ]
+            : prev.audit,
+      };
+    });
   }, []);
 
-  const cancelShopOrder = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      shopOrders: prev.shopOrders.map((o) =>
-        o.id === id && o.status !== "entregado" && o.status !== "cancelado"
-          ? { ...o, status: "cancelado" }
-          : o,
-      ),
-    }));
+  const cancelShopOrder = useCallback((id: string, actor?: Actor) => {
+    setState((prev) => {
+      const order = prev.shopOrders.find((o) => o.id === id);
+      const cancellable = order && order.status !== "entregado" && order.status !== "cancelado";
+      return {
+        ...prev,
+        shopOrders: prev.shopOrders.map((o) =>
+          o.id === id && o.status !== "entregado" && o.status !== "cancelado"
+            ? { ...o, status: "cancelado" }
+            : o,
+        ),
+        audit: cancellable
+          ? [
+              auditEntry("estado", "Canceló un pedido de la tienda", "Tienda online", `#${order.folio}`, actor),
+              ...prev.audit,
+            ]
+          : prev.audit,
+      };
+    });
   }, []);
 
   const addCoupon = useCallback((coupon: Coupon) => {
@@ -943,8 +1332,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const addPurchase = useCallback((purchase: Purchase) => {
+  const addPurchase = useCallback((purchase: Purchase, actor?: Actor) => {
     setState((prev) => {
+      // Desde la v2, las compras a proveedor entran a bodega central por
+      // defecto (bajo llave); el formulario permite ingresar directo a recepción.
+      const destination = purchase.warehouseId ?? "central";
       const movements: InventoryMovement[] = purchase.items.map((item, i) => ({
         id: `${makeId("m")}-${i}`,
         productId: item.productId,
@@ -952,19 +1344,407 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         quantity: item.quantity,
         at: purchase.at,
         refId: purchase.id,
-        user: purchase.user,
+        user: `${purchase.user ?? "Encargado"} · ${warehouseName(destination)}`,
       }));
       const products = prev.products.map((p) => {
         const item = purchase.items.find((it) => it.productId === p.id);
-        return item ? { ...p, stock: p.stock + item.quantity } : p;
+        if (!item) return p;
+        return destination === "central"
+          ? { ...p, centralStock: (p.centralStock ?? 0) + item.quantity }
+          : { ...p, stock: p.stock + item.quantity };
       });
       return {
         ...prev,
         products,
         movements: [...movements, ...prev.movements],
-        purchases: [purchase, ...prev.purchases],
+        purchases: [{ ...purchase, warehouseId: destination }, ...prev.purchases],
+        audit: [
+          auditEntry(
+            "crear",
+            "Ingresó stock de proveedor",
+            "Inventario",
+            `${purchase.provider} · ${formatCLP(purchase.total)} · ${warehouseName(destination)}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
       };
     });
+  }, []);
+
+  const requestTransfer = useCallback(
+    (items: TransferItem[], requestedBy: string, note?: string, actor?: Actor) => {
+      setState((prev) => {
+        const clean = items.filter((it) => it.quantity > 0);
+        if (clean.length === 0) return prev;
+        const transfer: Transfer = {
+          id: makeId("tr"),
+          from: "central",
+          to: "recepcion",
+          items: clean,
+          status: "solicitado",
+          requestedBy,
+          note: note?.trim() || undefined,
+          createdAt: new Date().toISOString(),
+          branchId: "limache",
+        };
+        return {
+          ...prev,
+          transfers: [transfer, ...prev.transfers],
+          audit: [
+            auditEntry(
+              "crear",
+              "Solicitó reposición a bodega central",
+              "Bodegas",
+              `${clean.length} producto${clean.length === 1 ? "" : "s"} · central → recepción`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
+  const createDirectTransfer = useCallback(
+    (from: string, to: string, items: TransferItem[], deliveredBy: string, actor?: Actor) => {
+      setState((prev) => {
+        const clean = items.filter((it) => it.quantity > 0);
+        if (clean.length === 0 || from === to) return prev;
+        const now = new Date().toISOString();
+        const { products, moved, shortages } = applyTransferToProducts(
+          prev.products,
+          clean,
+          from,
+        );
+        const transfer: Transfer = {
+          id: makeId("tr"),
+          from,
+          to,
+          items: moved,
+          status: "entregado",
+          requestedBy: deliveredBy,
+          deliveredBy,
+          note: shortages.length
+            ? `Cantidades recortadas al saldo disponible: ${shortages.join(", ")}.`
+            : undefined,
+          createdAt: now,
+          deliveredAt: now,
+          branchId: "limache",
+        };
+        const movements: InventoryMovement[] = moved
+          .filter((m) => m.quantity > 0)
+          .map((m, i) => ({
+            id: `${makeId("m")}-${i}`,
+            productId: m.productId,
+            type: "traspaso",
+            quantity: m.quantity,
+            at: now,
+            refId: transfer.id,
+            user: deliveredBy,
+          }));
+        return {
+          ...prev,
+          products,
+          transfers: [transfer, ...prev.transfers],
+          movements: [...movements, ...prev.movements],
+          audit: [
+            auditEntry(
+              "crear",
+              "Registró un traspaso directo",
+              "Bodegas",
+              `${moved.length} producto${moved.length === 1 ? "" : "s"} · ${warehouseName(from)} → ${warehouseName(to)}`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
+  const deliverTransfer = useCallback((id: string, deliveredBy: string, actor?: Actor) => {
+    setState((prev) => {
+      const transfer = prev.transfers.find((t) => t.id === id);
+      if (!transfer || transfer.status !== "solicitado") return prev;
+      const now = new Date().toISOString();
+      const { products, moved, shortages } = applyTransferToProducts(
+        prev.products,
+        transfer.items,
+        transfer.from,
+      );
+      const movements: InventoryMovement[] = moved
+        .filter((m) => m.quantity > 0)
+        .map((m, i) => ({
+          id: `${makeId("m")}-${i}`,
+          productId: m.productId,
+          type: "traspaso",
+          quantity: m.quantity,
+          at: now,
+          refId: transfer.id,
+          user: deliveredBy,
+        }));
+      const note = shortages.length
+        ? `${transfer.note ? `${transfer.note} ` : ""}Cantidades recortadas al saldo disponible: ${shortages.join(", ")}.`
+        : transfer.note;
+      return {
+        ...prev,
+        products,
+        movements: [...movements, ...prev.movements],
+        transfers: prev.transfers.map((t) =>
+          t.id === id
+            ? { ...t, status: "entregado", deliveredBy, deliveredAt: now, items: moved, note }
+            : t,
+        ),
+        audit: [
+          auditEntry(
+            "estado",
+            "Entregó una solicitud de bodega",
+            "Bodegas",
+            `Solicitud ${transfer.id} · ${moved.length} producto${moved.length === 1 ? "" : "s"} · ${warehouseName(transfer.from)} → ${warehouseName(transfer.to)}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
+      };
+    });
+  }, []);
+
+  const receiveTransfer = useCallback((id: string, receivedBy: string, actor?: Actor) => {
+    setState((prev) => {
+      const transfer = prev.transfers.find((t) => t.id === id);
+      if (!transfer || transfer.status !== "entregado") return prev;
+      return {
+        ...prev,
+        transfers: prev.transfers.map((t) =>
+          t.id === id
+            ? { ...t, status: "recibido", receivedBy, receivedAt: new Date().toISOString() }
+            : t,
+        ),
+        audit: [
+          auditEntry(
+            "estado",
+            "Confirmó recepción conforme",
+            "Bodegas",
+            `Solicitud ${transfer.id} · ${warehouseName(transfer.to)}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
+      };
+    });
+  }, []);
+
+  const rejectTransfer = useCallback((id: string, by: string, note?: string, actor?: Actor) => {
+    setState((prev) => {
+      const transfer = prev.transfers.find((t) => t.id === id);
+      if (!transfer || transfer.status !== "solicitado") return prev;
+      return {
+        ...prev,
+        transfers: prev.transfers.map((t) =>
+          t.id === id
+            ? { ...t, status: "rechazado", deliveredBy: by, note: note?.trim() || t.note }
+            : t,
+        ),
+        audit: [
+          auditEntry(
+            "estado",
+            "Rechazó una solicitud de bodega",
+            "Bodegas",
+            `Solicitud ${transfer.id}${note?.trim() ? ` · ${note.trim()}` : ""}`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
+      };
+    });
+  }, []);
+
+  const startStockCount = useCallback(
+    (warehouseId: string, group: string | undefined, by: string, actor?: Actor): string => {
+      const id = makeId("cnt");
+      setState((prev) => {
+        const scopeProducts = prev.products.filter((p) => !group || p.group === group);
+        if (scopeProducts.length === 0) return prev;
+        const count: StockCount = {
+          id,
+          scope: group ? "parcial" : "general",
+          warehouseId,
+          group,
+          lines: scopeProducts.map((p) => {
+            const expected = warehouseId === "central" ? (p.centralStock ?? 0) : p.stock;
+            // Las líneas parten cuadradas: en el conteo solo se editan las difieren.
+            return { productId: p.id, expected, counted: expected };
+          }),
+          status: "abierto",
+          adjusted: false,
+          by,
+          createdAt: new Date().toISOString(),
+          branchId: "limache",
+        };
+        return {
+          ...prev,
+          stockCounts: [count, ...prev.stockCounts],
+          audit: [
+            auditEntry(
+              "crear",
+              "Abrió un conteo de inventario",
+              "Bodegas",
+              `${group ? `Parcial · ${group}` : "Inventario general"} · ${warehouseName(warehouseId)}`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+      return id;
+    },
+    [],
+  );
+
+  const setCountLine = useCallback((countId: string, productId: string, counted: number) => {
+    setState((prev) => ({
+      ...prev,
+      stockCounts: prev.stockCounts.map((c) =>
+        c.id === countId && c.status === "abierto"
+          ? {
+              ...c,
+              lines: c.lines.map((l) =>
+                l.productId === productId ? { ...l, counted: Math.max(0, counted) } : l,
+              ),
+            }
+          : c,
+      ),
+    }));
+  }, []);
+
+  const closeStockCount = useCallback(
+    (countId: string, applyAdjustment: boolean, actor?: Actor) => {
+      setState((prev) => {
+        const count = prev.stockCounts.find((c) => c.id === countId);
+        if (!count || count.status !== "abierto") return prev;
+        const now = new Date().toISOString();
+        const diffs = count.lines.filter((l) => l.counted !== l.expected);
+        let products = prev.products;
+        let movements = prev.movements;
+        if (applyAdjustment && diffs.length > 0) {
+          const byId = new Map(diffs.map((l) => [l.productId, l]));
+          products = prev.products.map((p) => {
+            const line = byId.get(p.id);
+            if (!line) return p;
+            const delta = line.counted - line.expected;
+            return count.warehouseId === "central"
+              ? { ...p, centralStock: Math.max(0, (p.centralStock ?? 0) + delta) }
+              : { ...p, stock: Math.max(0, p.stock + delta) };
+          });
+          const adjustments: InventoryMovement[] = diffs.map((l, i) => ({
+            id: `${makeId("m")}-${i}`,
+            productId: l.productId,
+            type: "ajuste",
+            quantity: l.counted - l.expected,
+            at: now,
+            refId: count.id,
+            user: count.by,
+          }));
+          movements = [...adjustments, ...prev.movements];
+        }
+        return {
+          ...prev,
+          products,
+          movements,
+          stockCounts: prev.stockCounts.map((c) =>
+            c.id === countId
+              ? {
+                  ...c,
+                  status: "cerrado",
+                  closedAt: now,
+                  adjusted: applyAdjustment && diffs.length > 0,
+                }
+              : c,
+          ),
+          audit: [
+            auditEntry(
+              "estado",
+              "Cerró un conteo de inventario",
+              "Bodegas",
+              `${count.scope === "parcial" ? `Parcial · ${count.group}` : "Inventario general"} · ${warehouseName(count.warehouseId)} · ${diffs.length} diferencia${diffs.length === 1 ? "" : "s"}${applyAdjustment && diffs.length > 0 ? " · ajustado" : ""}`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
+  const closeShift = useCallback(
+    (
+      counted: { cash: number; card: number },
+      nextOpeningCash: number,
+      user?: string,
+      actor?: Actor,
+    ) => {
+      setState((prev) => {
+        const now = new Date().toISOString();
+        // Snapshot del ticket con TODO el catálogo (carta + sexshop + lo que venga).
+        const items = shiftItems(prev.movements, prev.products, prev.shift.id);
+        const closed: ClosedShift = {
+          ...prev.shift,
+          closedAt: now,
+          countedCash: counted.cash,
+          countedCard: counted.card,
+          // El real definitivo del corte es lo contado en el arqueo; el expected
+          // queda como lo acumuló el sistema. Ahí nace (o muere) el descuadre.
+          cash: { ...prev.shift.cash, real: counted.cash },
+          card: { ...prev.shift.card, real: counted.card },
+          transactions: prev.transactions,
+          expenseList: prev.expenses,
+          items,
+        };
+        const cashD = counted.cash - prev.shift.cash.expected;
+        const cardD = counted.card - prev.shift.card.expected;
+        return {
+          ...prev,
+          pastShifts: [closed, ...prev.pastShifts],
+          shift: {
+            id: makeId("s"),
+            folio: prev.shift.folio + 1,
+            user: user ?? prev.shift.user,
+            openedAt: now,
+            openingCash: nextOpeningCash,
+            cash: { real: 0, expected: 0 },
+            card: { real: 0, expected: 0 },
+            expenses: { real: 0, expected: 0 },
+            tipsCash: 0,
+            tipsCard: 0,
+            branchId: "limache",
+          },
+          transactions: [],
+          expenses: [],
+          audit: [
+            auditEntry(
+              "estado",
+              "Cerró el turno",
+              "Caja",
+              `Folio ${prev.shift.folio} · dif. efectivo ${formatCLP(cashD)} · dif. tarjeta ${formatCLP(cardD)}`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
+  const logAccess = useCallback((actor: Actor, detail?: string) => {
+    setState((prev) => ({
+      ...prev,
+      audit: [auditEntry("acceso", "Inició sesión", "Acceso", detail, actor), ...prev.audit],
+    }));
   }, []);
 
   const resetDemo = useCallback(() => {
@@ -1029,6 +1809,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     addPurchase,
     addProvider,
     addProductCategory,
+    closeShift,
+    logAccess,
+    requestTransfer,
+    createDirectTransfer,
+    deliverTransfer,
+    receiveTransfer,
+    rejectTransfer,
+    startStockCount,
+    setCountLine,
+    closeStockCount,
     resetDemo,
   };
 

@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
-import { SegmentedToggle } from "@/components/ui/SegmentedToggle";
-import { useSession } from "@/lib/session";
+import { SESSION_USERS, useSession } from "@/lib/session";
+import { useAppStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 import type { Role } from "@/types";
 
 const inputClass =
@@ -32,11 +33,17 @@ const PROFILES: Record<Role, { user: string; password: string; desc: string }> =
     password: "demo1234",
     desc: "Inventario: ingreso de stock con proveedor, lista de compra y monto total.",
   },
+  dueno: {
+    user: "dueno",
+    password: "demo1234",
+    desc: "Vista gerencial de solo lectura: ventas, ocupación, cortes, personal y auditoría.",
+  },
 };
 
 const ROLE_SEGMENTS: { value: Role; label: string }[] = [
   { value: "recepcion", label: "Recepción" },
   { value: "admin", label: "Admin" },
+  { value: "dueno", label: "Dueño" },
   { value: "encargado", label: "Encargado" },
   { value: "aseo", label: "Aseo" },
 ];
@@ -46,6 +53,7 @@ const HOME: Record<Role, string> = {
   recepcion: "/admin/habitaciones",
   aseo: "/admin/aseo",
   encargado: "/admin/compras",
+  dueno: "/admin/gerencia",
 };
 
 const ENTRY_LABEL: Record<Role, string> = {
@@ -53,11 +61,13 @@ const ENTRY_LABEL: Record<Role, string> = {
   recepcion: "recepción",
   aseo: "aseo",
   encargado: "encargado",
+  dueno: "dueño",
 };
 
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useSession();
+  const { logAccess } = useAppStore();
   const [role, setRole] = useState<Role>("recepcion");
   const [user, setUser] = useState(PROFILES.recepcion.user);
   const [password, setPassword] = useState(PROFILES.recepcion.password);
@@ -71,6 +81,8 @@ export default function LoginPage() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     login(role);
+    const profile = SESSION_USERS[role];
+    logAccess({ name: profile.name, role }, profile.roleLabel);
     // Cada rol aterriza en su home: admin → dashboard, recepción → tablero, aseo → su lista.
     router.push(HOME[role]);
   }
@@ -89,12 +101,31 @@ export default function LoginPage() {
         </p>
 
         <div className="mt-7">
-          <SegmentedToggle
-            segments={ROLE_SEGMENTS}
-            value={role}
-            onChange={selectRole}
-            className="w-full"
-          />
+          <div
+            role="tablist"
+            aria-orientation="horizontal"
+            aria-label="Perfil de acceso"
+            className="grid grid-cols-3 gap-1 rounded-sm border border-line bg-surface/60 p-1"
+          >
+            {ROLE_SEGMENTS.map((segment) => {
+              const active = segment.value === role;
+              return (
+                <button
+                  key={segment.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => selectRole(segment.value)}
+                  className={cn(
+                    "min-h-[44px] rounded-xs px-2 text-xs font-medium uppercase tracking-[0.1em] transition-colors duration-200 focus-visible:outline-none",
+                    active ? "bg-gold text-bg" : "text-muted hover:text-cream",
+                  )}
+                >
+                  {segment.label}
+                </button>
+              );
+            })}
+          </div>
           <p className="mt-3 min-h-[2.5rem] text-center text-xs leading-relaxed text-dim">
             {PROFILES[role].desc}
           </p>

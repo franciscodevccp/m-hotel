@@ -32,7 +32,9 @@ export function Modal({ title, subtitle, onClose, children }: ModalProps) {
       aria-label={title}
     >
       <div className="absolute inset-0 bg-bg/80 backdrop-blur-sm" onClick={onClose} aria-hidden />
-      <div className="relative w-full max-w-md border border-line-strong bg-surface-2 p-6 sm:rounded-md">
+      {/* max-h + scroll interno: en pantallas bajas (teléfonos) o contenidos largos,
+          el pie del modal siempre queda alcanzable. dvh respeta la barra de iOS. */}
+      <div className="relative max-h-dvh w-full max-w-md overflow-y-auto border border-line-strong bg-surface-2 p-6 sm:max-h-[calc(100dvh-3rem)] sm:rounded-md">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h3 className="font-display text-2xl text-cream">{title}</h3>

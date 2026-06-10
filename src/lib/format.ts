@@ -87,3 +87,10 @@ export const DURATION_LABELS: Record<Duration, string> = {
   6: "6 horas",
   12: "12 horas",
 };
+
+/** Minutos en formato legible ("18 min", "1h 5m"). */
+export function fmtDuration(min?: number): string {
+  if (min == null) return "—";
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)}h ${min % 60}m`;
+}

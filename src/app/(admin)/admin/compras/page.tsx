@@ -38,6 +38,7 @@ export default function ComprasPage() {
   } = useAppStore();
   const { user } = useSession();
   const allowed = !user || user.role === "admin" || user.role === "encargado";
+  const actor = user ? { name: user.name, role: user.role } : undefined;
 
   const sellable = useMemo(
     () => [...products].filter((p) => p.active).sort((a, b) => a.name.localeCompare(b.name)),
@@ -46,6 +47,7 @@ export default function ComprasPage() {
   const nameById = useMemo(() => new Map(products.map((p) => [p.id, p.name])), [products]);
 
   const [provider, setProvider] = useState(providers[0]?.name ?? "");
+  const [warehouseId, setWarehouseId] = useState("central");
   const [items, setItems] = useState<PurchaseItem[]>([]);
   const [detail, setDetail] = useState<Purchase | null>(null);
 
@@ -126,7 +128,7 @@ export default function ComprasPage() {
       image: null,
       active: true,
     };
-    addProduct(product);
+    addProduct(product, actor);
     addRow(product.id); // ya agrega la fila para cargar cantidad y costo
     setNpName("");
     setNpCategory(productCategories[0] ?? "Alimentación");
@@ -143,8 +145,10 @@ export default function ComprasPage() {
       total,
       at: new Date().toISOString(),
       user: user?.name ?? "Encargado",
+      warehouseId,
+      branchId: "limache",
     };
-    addPurchase(purchase);
+    addPurchase(purchase, actor);
     setItems([]);
   }
 
@@ -179,6 +183,20 @@ export default function ComprasPage() {
             options={providers.map((p) => ({ value: p.name, label: p.name }))}
           />
           {selectedProviderRut && <p className="mt-2 text-xs text-dim">RUT {selectedProviderRut}</p>}
+        </div>
+
+        {/* Bodega de destino: las compras entran a central (bajo llave) por defecto */}
+        <div className="mt-5 max-w-sm">
+          <label className="kicker text-dim">Bodega de destino</label>
+          <Select
+            value={warehouseId}
+            onValueChange={setWarehouseId}
+            ariaLabel="Bodega de destino"
+            options={[
+              { value: "central", label: "Bodega central (bajo llave)" },
+              { value: "recepcion", label: "Bodega de recepción" },
+            ]}
+          />
         </div>
 
         {/* Lista de compra */}

@@ -8,13 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { Select } from "@/components/ui/Select";
-import {
-  cashDiff,
-  cardDiff,
-  ingresosTotales,
-  shiftItems,
-  utilidadTurno,
-} from "@/lib/cash";
+import { ingresosTotales, shiftItems, utilidadTurno } from "@/lib/cash";
 import { formatCLP } from "@/lib/format";
 import { makeId } from "@/lib/id";
 import { useSession } from "@/lib/session";
@@ -25,6 +19,7 @@ import type {
   ExpenseCategory,
   PaymentMethod,
   Product,
+  Shift,
   Transaction,
 } from "@/types";
 
@@ -57,15 +52,26 @@ function Row({ label, value, accent }: { label: string; value: string; accent?: 
 type ModalKind = "payment" | "sale" | "expense" | "print" | "close" | null;
 
 export default function CajaPage() {
-  const { rooms, transactions, shift, products, movements, addTransaction, addExpense, sellProduct } =
-    useAppStore();
+  const {
+    rooms,
+    transactions,
+    shift,
+    products,
+    movements,
+    addTransaction,
+    addExpense,
+    sellProduct,
+    closeShift,
+  } = useAppStore();
   const { user } = useSession();
   const [modal, setModal] = useState<ModalKind>(null);
 
   const userLabel = user ? `${user.roleLabel} · ${user.name}` : shift.user;
-  // Por ahora el corte itemiza solo la carta (room service); el sexshop se habilita luego.
+  const actor = user ? { name: user.name, role: user.role } : undefined;
+  // El corte itemiza TODO lo vendido en el turno: carta y sexshop entran al mismo
+  // inventario y al mismo corte (registro único multicanal).
   const items = useMemo(
-    () => shiftItems(movements, products.filter((p) => p.category === "carta"), shift.id),
+    () => shiftItems(movements, products, shift.id),
     [movements, products, shift.id],
   );
 
@@ -86,7 +92,7 @@ export default function CajaPage() {
       at: new Date().toISOString(),
       user: userLabel,
     };
-    addTransaction(transaction);
+    addTransaction(transaction, actor);
     setAmount(0);
     setMethod("cash");
     setModal(null);
@@ -98,12 +104,14 @@ export default function CajaPage() {
   const [saleQty, setSaleQty] = useState(1);
   const saleProduct = products.find((p) => p.id === saleProductId) as Product | undefined;
   const saleTotal = saleProduct ? saleProduct.price * saleQty : 0;
-  const saleValid = Boolean(saleProduct) && saleQty > 0;
+  // La venta no puede superar el saldo de recepción: sin stock no hay cobro.
+  const saleMax = saleProduct?.stock ?? 0;
+  const saleValid = Boolean(saleProduct) && saleQty > 0 && saleQty <= saleMax;
 
   function registerSale(e: React.FormEvent) {
     e.preventDefault();
     if (!saleProduct || saleQty <= 0) return;
-    sellProduct(saleProduct.id, saleQty, "presencial", shift.id, userLabel);
+    sellProduct(saleProduct.id, saleQty, "presencial", shift.id, userLabel, actor);
     setSaleQty(1);
     setModal(null);
   }
@@ -125,7 +133,7 @@ export default function CajaPage() {
       at: new Date().toISOString(),
       user: userLabel,
     };
-    addExpense(expense);
+    addExpense(expense, actor);
     setConcept("");
     setExpenseAmount(0);
     setExpenseCat("insumos");
@@ -360,50 +368,137 @@ export default function CajaPage() {
         </Modal>
       )}
 
-      {/* Cerrar turno */}
+      {/* Cerrar turno: arqueo de caja */}
       {modal === "close" && (
-        <Modal title="Cierre de turno" subtitle="Cuadre de caja" onClose={() => setModal(null)}>
-          <dl className="space-y-3">
-            <Row label="Efectivo (real)" value={formatCLP(shift.cash.real)} />
-            <Row label="Tarjeta (real)" value={formatCLP(shift.card.real)} />
-            <Row label="Ingresos totales" value={formatCLP(ingresosTotales(shift))} />
-            <Row label="Gastos" value={formatCLP(shift.expenses.real)} />
-            <Row label="Utilidad del turno" value={formatCLP(utilidadTurno(shift))} accent />
-          </dl>
-          <div className="mt-4 space-y-1 border-t border-line pt-4">
-            <div className="flex items-baseline justify-between">
-              <span className="kicker text-dim">Diferencia efectivo</span>
-              <span
-                className={cn(
-                  "tnum text-sm",
-                  cashDiff(shift) < 0 ? "text-busy" : cashDiff(shift) > 0 ? "text-gold" : "text-ok",
-                )}
-              >
-                {cashDiff(shift) === 0 ? "Cuadrado" : formatCLP(cashDiff(shift))}
-              </span>
-            </div>
-            <div className="flex items-baseline justify-between">
-              <span className="kicker text-dim">Diferencia tarjeta</span>
-              <span
-                className={cn(
-                  "tnum text-sm",
-                  cardDiff(shift) < 0 ? "text-busy" : cardDiff(shift) > 0 ? "text-gold" : "text-ok",
-                )}
-              >
-                {cardDiff(shift) === 0 ? "Cuadrado" : formatCLP(cardDiff(shift))}
-              </span>
-            </div>
-          </div>
-          <p className="mt-4 text-xs leading-relaxed text-dim">
-            {cashDiff(shift) !== 0 || cardDiff(shift) !== 0
-              ? "Hay un descuadre en el turno. Revisa los comprobantes antes de cerrar."
-              : "La caja cuadra con lo esperado."}
-          </p>
-          <Button className="mt-6 w-full" onClick={() => setModal(null)}>
-            Confirmar cierre
-          </Button>
-        </Modal>
+        <CloseShiftModal
+          shift={shift}
+          onClose={() => setModal(null)}
+          onConfirm={(counted, nextOpeningCash) =>
+            closeShift(counted, nextOpeningCash, userLabel, actor)
+          }
+        />
       )}
     </div>
+  );
+}
+
+function ArqueoDiff({ diff }: { diff: number }) {
+  return (
+    <p
+      className={cn(
+        "mt-1.5 text-xs",
+        diff < 0 ? "text-busy" : diff > 0 ? "text-gold" : "text-ok",
+      )}
+    >
+      {diff === 0
+        ? "Cuadra con lo esperado"
+        : diff < 0
+          ? `Falta ${formatCLP(Math.abs(diff))}`
+          : `Sobra ${formatCLP(diff)}`}
+    </p>
+  );
+}
+
+function CloseShiftModal({
+  shift,
+  onClose,
+  onConfirm,
+}: {
+  shift: Shift;
+  onClose: () => void;
+  onConfirm: (counted: { cash: number; card: number }, nextOpeningCash: number) => void;
+}) {
+  // El arqueo parte en lo que el sistema espera; el cajero corrige con lo contado.
+  const [countedCash, setCountedCash] = useState(shift.cash.expected);
+  const [countedCard, setCountedCard] = useState(shift.card.expected);
+  const [nextOpening, setNextOpening] = useState(15000);
+  const [closedFolio, setClosedFolio] = useState<number | null>(null);
+
+  const cashD = countedCash - shift.cash.expected;
+  const cardD = countedCard - shift.card.expected;
+
+  if (closedFolio != null) {
+    return (
+      <Modal title="Turno cerrado" subtitle={`Folio ${closedFolio}`} onClose={onClose}>
+        <p className="text-sm leading-relaxed text-muted">
+          El corte del folio {closedFolio} quedó archivado con su arqueo y su detalle. Se abrió
+          el folio {closedFolio + 1} con {formatCLP(nextOpening)} de caja inicial.
+        </p>
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          <Button variant="secondary" className="w-full" onClick={onClose}>
+            Volver a caja
+          </Button>
+          <a href="/admin/cortes" className="contents">
+            <Button className="w-full">Ver cortes</Button>
+          </a>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal title="Cierre de turno" subtitle={`Arqueo · Folio ${shift.folio}`} onClose={onClose}>
+      <dl className="space-y-3">
+        <Row label="Efectivo esperado" value={formatCLP(shift.cash.expected)} />
+        <Row label="Tarjeta esperada" value={formatCLP(shift.card.expected)} />
+        <Row label="Ingresos totales" value={formatCLP(ingresosTotales(shift))} />
+        <Row label="Gastos" value={formatCLP(shift.expenses.real)} />
+        <Row label="Utilidad del turno" value={formatCLP(utilidadTurno(shift))} accent />
+      </dl>
+
+      <div className="mt-5 space-y-4 border-t border-line pt-5">
+        <div>
+          <label className="kicker text-dim" htmlFor="counted-cash">
+            Efectivo contado
+          </label>
+          <MoneyInput
+            id="counted-cash"
+            value={countedCash}
+            onValueChange={setCountedCash}
+            className={fieldClass}
+          />
+          <ArqueoDiff diff={cashD} />
+        </div>
+        <div>
+          <label className="kicker text-dim" htmlFor="counted-card">
+            Comprobantes tarjeta
+          </label>
+          <MoneyInput
+            id="counted-card"
+            value={countedCard}
+            onValueChange={setCountedCard}
+            className={fieldClass}
+          />
+          <ArqueoDiff diff={cardD} />
+        </div>
+        <div>
+          <label className="kicker text-dim" htmlFor="next-opening">
+            Caja inicial del próximo turno
+          </label>
+          <MoneyInput
+            id="next-opening"
+            value={nextOpening}
+            onValueChange={setNextOpening}
+            className={fieldClass}
+          />
+        </div>
+      </div>
+
+      <p className="mt-4 text-xs leading-relaxed text-dim">
+        {cashD !== 0 || cardD !== 0
+          ? "La diferencia queda registrada en el corte archivado, con responsable y hora."
+          : "La caja cuadra con lo esperado."}
+      </p>
+
+      <Button
+        className="mt-5 w-full"
+        onClick={() => {
+          onConfirm({ cash: countedCash, card: countedCard }, nextOpening);
+          setClosedFolio(shift.folio);
+        }}
+      >
+        Confirmar cierre
+      </Button>
+    </Modal>
   );
 }

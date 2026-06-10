@@ -22,23 +22,26 @@ function StatCard({
   accent?: boolean;
 }) {
   return (
-    <div className="border border-line bg-surface/40 p-5">
+    <div className="flex flex-col border border-line bg-surface/40 p-5">
       <p className="kicker text-dim">{label}</p>
-      <p className={cn("tnum mt-3 font-display text-3xl", accent ? "text-gold" : "text-cream")}>
-        {value}
-      </p>
-      {hint && <p className="mt-1 text-xs text-dim">{hint}</p>}
+      <div className="mt-auto pt-3">
+        <p className={cn("tnum font-display text-3xl", accent ? "text-gold" : "text-cream")}>
+          {value}
+        </p>
+        {hint && <p className="mt-1 text-xs text-dim">{hint}</p>}
+      </div>
     </div>
   );
 }
 
 export default function DashboardPage() {
-  const { rooms, reservations, shift, transactions, resetDemo } = useAppStore();
+  const { rooms, reservations, shift, transactions, transfers, resetDemo } = useAppStore();
   const { user } = useSession();
 
   const occupied = rooms.filter((r) => r.status === "occupied").length;
   const occupancy = Math.round((occupied / rooms.length) * 100);
   const diff = totalDiff(shift);
+  const pendingTransfers = transfers.filter((t) => t.status === "solicitado").length;
 
   const counts = ROOM_STATUS_ORDER.map((status) => ({
     status,
@@ -83,6 +86,29 @@ export default function DashboardPage() {
           value={diff === 0 ? "Cuadrado" : formatCLP(Math.abs(diff))}
           hint={diff < 0 ? "Falta en caja" : diff > 0 ? "Sobra en caja" : "Sin descuadre"}
         />
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {pendingTransfers > 0 && (
+          <Link
+            href="/admin/bodegas"
+            className="flex items-baseline justify-between border border-gold/40 bg-surface/40 px-5 py-4 transition-colors hover:border-gold/70"
+          >
+            <span className="text-sm text-gold">
+              Solicitudes de bodega pendientes: {pendingTransfers}
+            </span>
+            <span className="kicker text-dim">Resolver →</span>
+          </Link>
+        )}
+        {user?.role === "admin" && (
+          <Link
+            href="/admin/gerencia"
+            className="flex items-baseline justify-between border border-line bg-surface/40 px-5 py-4 transition-colors hover:border-gold/50"
+          >
+            <span className="text-sm text-cream">Panel gerencial</span>
+            <span className="kicker text-dim">Ventas y tendencias →</span>
+          </Link>
+        )}
       </div>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-2">

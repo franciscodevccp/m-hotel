@@ -35,7 +35,7 @@ export function SegmentedToggle<T extends string>({
             aria-selected={active}
             onClick={() => onChange(segment.value)}
             className={cn(
-              "min-h-[44px] flex-1 rounded-xs px-4 text-xs font-medium uppercase tracking-[0.14em] transition-colors duration-200 focus-visible:outline-none",
+              "min-h-[44px] flex-1 whitespace-nowrap rounded-xs px-3 text-xs font-medium uppercase tracking-[0.1em] transition-colors duration-200 focus-visible:outline-none",
               active ? "bg-gold text-bg" : "text-muted hover:text-cream",
             )}
           >

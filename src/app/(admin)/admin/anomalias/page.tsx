@@ -26,6 +26,7 @@ const fieldClass =
 export default function AnomaliasPage() {
   const { anomalies, rooms, maintenanceReports, addAnomaly, resolveAnomaly } = useAppStore();
   const { user } = useSession();
+  const actor = user ? { name: user.name, role: user.role } : undefined;
   const [open, setOpen] = useState(false);
 
   const [roomId, setRoomId] = useState("");
@@ -51,7 +52,7 @@ export default function AnomaliasPage() {
       user: user ? `${user.roleLabel} · ${user.name}` : "Recepción",
       status: "abierta",
     };
-    addAnomaly(anomaly);
+    addAnomaly(anomaly, actor);
     setRoomId("");
     setType("dano");
     setDescription("");
@@ -122,7 +123,7 @@ export default function AnomaliasPage() {
                   {a.status === "abierta" && (
                     <button
                       type="button"
-                      onClick={() => resolveAnomaly(a.id)}
+                      onClick={() => resolveAnomaly(a.id, actor)}
                       className="shrink-0 border border-line px-3 py-2 text-xs uppercase tracking-[0.14em] text-muted transition-colors hover:border-gold/70 hover:text-gold"
                     >
                       Resolver

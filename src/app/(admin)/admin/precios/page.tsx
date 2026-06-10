@@ -68,6 +68,7 @@ export default function PreciosPage() {
     updateCategory,
   } = useAppStore();
   const { user } = useSession();
+  const actor = user ? { name: user.name, role: user.role } : undefined;
 
   const [editCat, setEditCat] = useState<Category | null>(null);
   const [editDiscount, setEditDiscount] = useState<Discount | null>(null);
@@ -127,7 +128,7 @@ export default function PreciosPage() {
   }
   function saveCat() {
     if (!editCat) return;
-    updateCategory(editCat);
+    updateCategory(editCat, actor);
     setEditCat(null);
   }
 

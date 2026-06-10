@@ -47,6 +47,7 @@ const MOTEL_GROUPS: NavGroup[] = [
     links: [
       { href: "/admin/compras", label: "Ingreso de stock", roles: STOCK },
       { href: "/admin/inventario", label: "Productos y stock", roles: STAFF },
+      { href: "/admin/bodegas", label: "Bodegas y traspasos", roles: STAFF },
       { href: "/admin/paquetes", label: "Paquetes", roles: ADMIN },
     ],
   },
@@ -57,7 +58,9 @@ const MOTEL_GROUPS: NavGroup[] = [
   {
     title: "Reportes",
     links: [
+      { href: "/admin/gerencia", label: "Panel gerencial", roles: ADMIN },
       { href: "/admin/reportes", label: "Reportes y gráficas", roles: ADMIN },
+      { href: "/admin/personal", label: "Personal", roles: ADMIN },
       { href: "/admin/cortes", label: "Cortes de caja", roles: ADMIN },
     ],
   },
@@ -107,6 +110,30 @@ const ASEO_GROUPS: NavGroup[] = [
   },
 ];
 
+// Área del dueño: vista gerencial de solo lectura.
+const DUENO: Role[] = ["dueno"];
+const DUENO_GROUPS: NavGroup[] = [
+  {
+    title: "Gerencia",
+    links: [
+      { href: "/admin/gerencia", label: "Panel gerencial", roles: DUENO },
+      { href: "/admin/reportes", label: "Reportes y gráficas", roles: DUENO },
+      { href: "/admin/cortes", label: "Cortes de caja", roles: DUENO },
+    ],
+  },
+  {
+    title: "Operación",
+    links: [
+      { href: "/admin/habitaciones", label: "Habitaciones", roles: DUENO },
+      { href: "/admin/personal", label: "Personal", roles: DUENO },
+    ],
+  },
+  {
+    title: "Control",
+    links: [{ href: "/admin/auditoria", label: "Auditoría", roles: DUENO }],
+  },
+];
+
 const AREA_HOME: Record<AdminArea, string> = { motel: "/admin", tienda: "/admin/tienda" };
 
 export function AdminNav() {
@@ -122,9 +149,11 @@ export function AdminNav() {
   const baseGroups =
     user?.role === "aseo"
       ? ASEO_GROUPS
-      : user?.role === "admin" && area === "tienda"
-        ? TIENDA_GROUPS
-        : MOTEL_GROUPS;
+      : user?.role === "dueno"
+        ? DUENO_GROUPS
+        : user?.role === "admin" && area === "tienda"
+          ? TIENDA_GROUPS
+          : MOTEL_GROUPS;
 
   const visibleGroups = baseGroups
     .map((group) => ({

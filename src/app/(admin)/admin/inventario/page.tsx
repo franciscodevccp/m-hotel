@@ -7,6 +7,10 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { Select } from "@/components/ui/Select";
+import { SegmentedToggle } from "@/components/ui/SegmentedToggle";
+import { PRODUCT_SALES_30D } from "@/data/history";
+import { warehouseName } from "@/data/warehouses";
+import { centralOf, lowMovement, totalOf } from "@/lib/inventory";
 import { formatCLP, formatDateTime } from "@/lib/format";
 import { makeId } from "@/lib/id";
 import { useSession } from "@/lib/session";
@@ -18,6 +22,7 @@ import type {
   Product,
   ProductCategory,
   SalesChannel,
+  Transfer,
 } from "@/types";
 
 const CATEGORY_LABELS: Record<ProductCategory, string> = {
@@ -26,6 +31,7 @@ const CATEGORY_LABELS: Record<ProductCategory, string> = {
   bebestible: "Bebestible",
   snack: "Snack",
   amenidad: "Amenidad",
+  insumo: "Insumos",
   otro: "Otro",
 };
 
@@ -40,8 +46,50 @@ const fieldClass =
 
 const PAGE_SIZE = 15;
 
+type SortKey = "name" | "price" | "stock" | "central";
+type SortDir = "asc" | "desc";
+
+/** Encabezado de columna ordenable: click alterna menor→mayor / mayor→menor. */
+function SortHeader({
+  label,
+  active,
+  dir,
+  align = "left",
+  withBorder = true,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  dir: SortDir;
+  align?: "left" | "right" | "center";
+  withBorder?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={`Ordenar por ${label.toLowerCase()}`}
+      className={cn(
+        "kicker flex items-baseline gap-1.5 self-stretch pt-0.5 transition-colors",
+        withBorder && "border-l border-line px-4",
+        align === "right" && "justify-end text-right",
+        align === "center" && "justify-center text-center",
+        active ? "text-gold" : "text-dim hover:text-muted",
+      )}
+    >
+      {label}
+      <span className={cn("text-[0.6rem]", !active && "opacity-0")} aria-hidden>
+        {dir === "asc" ? "↑" : "↓"}
+      </span>
+    </button>
+  );
+}
+
 function emptyProduct(family: ProductCategory): Product {
   const isShop = family === "sexshop";
+  const isSupply = family === "insumo";
   return {
     id: makeId("p"),
     sku: "",
@@ -49,8 +97,9 @@ function emptyProduct(family: ProductCategory): Product {
     category: family,
     price: 0,
     stock: 0,
-    lowStockThreshold: 10,
-    channels: isShop ? ["online", "presencial"] : ["room_service"],
+    centralStock: 0,
+    lowStockThreshold: isSupply ? 8 : 10,
+    channels: isShop ? ["online", "presencial"] : isSupply ? [] : ["room_service"],
     ageRestricted: isShop,
     image: null,
     description: "",
@@ -59,11 +108,14 @@ function emptyProduct(family: ProductCategory): Product {
 }
 
 export default function InventarioPage() {
-  const { products, movements, addProduct, updateProduct, adjustStock } = useAppStore();
+  const { products, movements, transfers, addProduct, updateProduct, adjustStock } = useAppStore();
   const { user, area } = useSession();
   const canManage = user?.role === "admin";
-  // Motel = carta (room service); Tienda online = sexshop. Inventarios separados.
-  const family: ProductCategory = area === "tienda" ? "sexshop" : "carta";
+  const actor = user ? { name: user.name, role: user.role } : undefined;
+  // Motel = carta o insumos (toggle); Tienda online = sexshop.
+  const [motelFamily, setMotelFamily] = useState<"carta" | "insumo">("carta");
+  const family: ProductCategory = area === "tienda" ? "sexshop" : motelFamily;
+  const isSupplies = family === "insumo";
 
   const [editing, setEditing] = useState<Product | null>(null);
   const [isNew, setIsNew] = useState(false);
@@ -72,8 +124,21 @@ export default function InventarioPage() {
   const [page, setPage] = useState(0);
   const [query, setQuery] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
+  const [onlyLowMovement, setOnlyLowMovement] = useState(false);
+  // Orden con tres estados por columna: ascendente → descendente → predeterminado
+  // (null = alfabético por nombre, sin columna destacada).
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null);
 
-  // El inventario muestra solo la familia del área activa (carta o sexshop).
+  function toggleSort(key: SortKey) {
+    setSort((prev) => {
+      if (prev?.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+    setPage(0);
+  }
+
+  // El inventario muestra solo la familia del área activa.
   const familyProducts = useMemo(
     () => products.filter((p) => p.category === family),
     [products, family],
@@ -83,28 +148,55 @@ export default function InventarioPage() {
     for (const p of familyProducts) if (p.group && !seen.includes(p.group)) seen.push(p.group);
     return seen;
   }, [familyProducts]);
-  const lowCount = familyProducts.filter((p) => stockLevel(p) !== "ok").length;
+  // Los insumos viven en bodega central: su nivel de stock se evalúa sobre el
+  // saldo total del recinto, no solo sobre lo que hay a mano en recepción.
+  const levelProduct = (p: Product): Product =>
+    p.category === "insumo" ? { ...p, stock: totalOf(p) } : p;
+  const lowCount = familyProducts.filter((p) => stockLevel(levelProduct(p)) !== "ok").length;
   const groupCount = new Set(familyProducts.map((p) => p.group).filter(Boolean)).size;
+  const lowMovementIds = useMemo(
+    () => new Set(lowMovement(familyProducts).map((p) => p.id)),
+    [familyProducts],
+  );
 
   const q = query.trim().toLowerCase();
-  const filtered = useMemo(
-    () =>
-      familyProducts
-        .filter((p) => groupFilter === "all" || p.group === groupFilter)
-        .filter((p) => !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [familyProducts, groupFilter, q],
-  );
+  const filtered = useMemo(() => {
+    const key = sort?.key ?? "name";
+    const dir = sort?.dir ?? "asc";
+    const numericValue = (p: Product): number => {
+      switch (key) {
+        case "price":
+          return isSupplies ? (p.cost ?? 0) : p.price;
+        case "stock":
+          return p.stock;
+        default:
+          return centralOf(p);
+      }
+    };
+    return familyProducts
+      .filter((p) => groupFilter === "all" || p.group === groupFilter)
+      .filter((p) => !onlyLowMovement || lowMovementIds.has(p.id))
+      .filter((p) => !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))
+      .slice()
+      .sort((a, b) => {
+        const cmp =
+          key === "name"
+            ? a.name.localeCompare(b.name, "es")
+            : numericValue(a) - numericValue(b) || a.name.localeCompare(b.name, "es");
+        return dir === "desc" ? -cmp : cmp;
+      });
+  }, [familyProducts, groupFilter, onlyLowMovement, lowMovementIds, q, sort, isSupplies]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const pageItems = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
-  // Al cambiar de área, reinicia el filtro y la página (los grupos cambian).
+  // Al cambiar de área o familia, reinicia filtros, orden y página.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset al cambiar de familia
     setGroupFilter("all");
+    setOnlyLowMovement(false);
+    setSort(null);
     setPage(0);
   }, [family]);
 
@@ -118,31 +210,27 @@ export default function InventarioPage() {
   }
   function saveProduct() {
     if (!editing || !editing.name.trim() || !editing.sku.trim()) return;
-    if (isNew) addProduct(editing);
-    else updateProduct(editing);
+    if (isNew) addProduct(editing, actor);
+    else updateProduct(editing, actor);
     setEditing(null);
   }
 
   return (
     <div className="mx-auto max-w-5xl">
-      <div className="mb-8 flex items-start justify-between gap-4">
-        <div>
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
           <span className="kicker text-gold">Inventario</span>
           <h1 className="mt-3 font-display text-3xl text-cream sm:text-4xl">Productos y stock</h1>
           <p className="mt-2 text-sm text-muted">
             {area === "tienda"
-              ? "Catálogo y stock de la tienda online (sexshop). Va por separado del inventario del motel."
-              : "Carta de room service del motel. El sexshop se gestiona en la tienda online."}
+              ? "Catálogo y stock de la tienda online (sexshop). Comparte inventario con la venta en recepción."
+              : isSupplies
+                ? "Insumos de aseo, operativos, lavandería, blancos y cortesías del recinto."
+                : "Carta de room service y venta en recepción. El sexshop se gestiona en la tienda online."}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-3">
-          <StockReportButton
-            products={familyProducts}
-            groups={groupOptions}
-            areaLabel={
-              area === "tienda" ? "Tienda online · Sexshop" : "Motel · Carta / room service"
-            }
-          />
+        <div className="flex flex-wrap gap-3">
+          <StockReportButton products={products} initialFamily={family} />
           <Button variant="secondary" onClick={() => setShowMovements(true)}>
             Movimientos
           </Button>
@@ -150,26 +238,66 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div className="border border-line bg-surface/40 p-4">
+      {area !== "tienda" && (
+        <SegmentedToggle
+          segments={[
+            { value: "carta", label: "Carta" },
+            { value: "insumo", label: "Insumos" },
+          ]}
+          value={motelFamily}
+          onChange={(v) => setMotelFamily(v)}
+          className="mb-6 w-full sm:max-w-xs"
+        />
+      )}
+
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="flex flex-col border border-line bg-surface/40 p-4">
           <p className="kicker text-dim">Productos</p>
-          <p className="tnum mt-2 font-display text-2xl text-cream">{familyProducts.length}</p>
+          <p className="tnum mt-auto pt-2 font-display text-2xl text-cream">
+            {familyProducts.length}
+          </p>
         </div>
-        <div className="border border-line bg-surface/40 p-4">
+        <div className="flex flex-col border border-line bg-surface/40 p-4">
           <p className="kicker text-dim">Stock bajo</p>
           <p
             className={cn(
-              "tnum mt-2 font-display text-2xl",
+              "tnum mt-auto pt-2 font-display text-2xl",
               lowCount > 0 ? "text-busy" : "text-cream",
             )}
           >
             {lowCount}
           </p>
         </div>
-        <div className="col-span-2 border border-line bg-surface/40 p-4 sm:col-span-1">
+        <div className="flex flex-col border border-line bg-surface/40 p-4">
           <p className="kicker text-dim">Sub-categorías</p>
-          <p className="tnum mt-2 font-display text-2xl text-cream">{groupCount}</p>
+          <p className="tnum mt-auto pt-2 font-display text-2xl text-cream">{groupCount}</p>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            setOnlyLowMovement((v) => !v);
+            setPage(0);
+          }}
+          disabled={isSupplies}
+          className={cn(
+            "flex flex-col border p-4 text-left transition-colors disabled:pointer-events-none disabled:opacity-50",
+            onlyLowMovement
+              ? "border-gold/60 bg-surface-2"
+              : "border-line bg-surface/40 hover:border-line-strong",
+          )}
+        >
+          <p className="kicker text-dim">Bajo movimiento (30 d)</p>
+          <p className="mt-auto flex items-baseline gap-2 pt-2">
+            <span className="tnum font-display text-2xl text-cream">
+              {isSupplies ? "—" : lowMovementIds.size}
+            </span>
+            {!isSupplies && (
+              <span className="truncate text-[0.65rem] uppercase tracking-[0.1em] text-dim">
+                {onlyLowMovement ? "Filtrando · ver todos" : "Ver solo estos"}
+              </span>
+            )}
+          </p>
+        </button>
       </div>
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -199,12 +327,40 @@ export default function InventarioPage() {
       </div>
 
       <div className="border border-line bg-surface/40">
-        <div className="hidden grid-cols-[minmax(0,1.9fr)_0.9fr_96px_140px_auto] gap-4 border-b border-line px-5 py-3 sm:grid">
-          <span className="kicker text-dim">Producto</span>
-          <span className="kicker text-dim">Categoría</span>
-          <span className="kicker text-dim text-right">Precio</span>
-          <span className="kicker text-dim">Stock</span>
-          <span className="kicker text-dim justify-self-end">{canManage ? "Acciones" : ""}</span>
+        <div className="hidden grid-cols-[minmax(0,2fr)_96px_124px_84px_132px] border-b border-line px-5 py-3 lg:grid xl:grid-cols-[minmax(0,2fr)_minmax(0,0.7fr)_112px_140px_100px_156px]">
+          <SortHeader
+            label="Producto"
+            active={sort?.key === "name"}
+            dir={sort?.dir ?? "asc"}
+            withBorder={false}
+            onClick={() => toggleSort("name")}
+          />
+          <span className="kicker hidden self-stretch border-l border-line px-4 pt-0.5 text-dim xl:block">
+            Categoría
+          </span>
+          <SortHeader
+            label={isSupplies ? "Costo" : "Precio"}
+            active={sort?.key === "price"}
+            dir={sort?.dir ?? "asc"}
+            align="right"
+            onClick={() => toggleSort("price")}
+          />
+          <SortHeader
+            label="Recepción"
+            active={sort?.key === "stock"}
+            dir={sort?.dir ?? "asc"}
+            onClick={() => toggleSort("stock")}
+          />
+          <SortHeader
+            label="Central"
+            active={sort?.key === "central"}
+            dir={sort?.dir ?? "asc"}
+            align="center"
+            onClick={() => toggleSort("central")}
+          />
+          <span className="kicker self-stretch border-l border-line pl-4 pt-0.5 text-right text-dim">
+            {canManage ? "Acciones" : ""}
+          </span>
         </div>
 
         <ul>
@@ -214,9 +370,9 @@ export default function InventarioPage() {
           {pageItems.map((p) => (
             <li
               key={p.id}
-              className="grid grid-cols-1 gap-2 border-b border-line px-5 py-4 last:border-b-0 sm:grid-cols-[minmax(0,1.9fr)_0.9fr_96px_140px_auto] sm:items-center sm:gap-4"
+              className="grid grid-cols-1 gap-2 border-b border-line px-5 py-4 last:border-b-0 lg:grid-cols-[minmax(0,2fr)_96px_124px_84px_132px] lg:gap-0 xl:grid-cols-[minmax(0,2fr)_minmax(0,0.7fr)_112px_140px_100px_156px]"
             >
-              <div className="min-w-0">
+              <div className="min-w-0 lg:flex lg:flex-col lg:justify-center lg:pr-4">
                 <p className="flex items-center gap-2 truncate text-sm text-cream">
                   <span className="truncate">{p.name}</span>
                   {p.ageRestricted && (
@@ -227,21 +383,36 @@ export default function InventarioPage() {
                 </p>
                 <p className="truncate text-xs text-dim">
                   {p.group ? `${p.group} · ` : ""}
-                  {p.channels.map((c) => CHANNEL_LABELS[c]).join(" · ")}
+                  {p.channels.length > 0
+                    ? p.channels.map((c) => CHANNEL_LABELS[c]).join(" · ")
+                    : "Uso interno"}
+                  {!isSupplies && (PRODUCT_SALES_30D[p.id] ?? 0) === 0 && p.active && (
+                    <span className="text-dim"> · Sin ventas 30 d</span>
+                  )}
                 </p>
               </div>
 
-              <span className="text-sm text-muted">{CATEGORY_LABELS[p.category]}</span>
+              <div className="hidden min-w-0 xl:flex xl:items-center xl:self-stretch xl:border-l xl:border-line xl:px-4">
+                <span className="truncate text-sm text-muted">
+                  {CATEGORY_LABELS[p.category]}
+                </span>
+              </div>
 
-              <span className="tnum text-sm text-cream sm:text-right">{formatCLP(p.price)}</span>
+              <span className="tnum text-sm text-cream lg:flex lg:items-center lg:justify-end lg:self-stretch lg:border-l lg:border-line lg:px-4">
+                {formatCLP(isSupplies ? (p.cost ?? 0) : p.price)}
+              </span>
 
-              <span className="flex items-center gap-2.5">
-                <span className="tnum w-6 text-right text-sm text-cream">{p.stock}</span>
-                <StockBadge product={p} />
+              <span className="flex items-center gap-2 lg:self-stretch lg:border-l lg:border-line lg:px-4">
+                <span className="tnum w-7 shrink-0 text-sm text-cream">{p.stock}</span>
+                <StockBadge product={levelProduct(p)} />
+              </span>
+
+              <span className="tnum hidden text-sm text-muted lg:flex lg:items-center lg:justify-center lg:self-stretch lg:border-l lg:border-line lg:px-4">
+                {centralOf(p)}
               </span>
 
               {canManage ? (
-                <span className="flex gap-4 sm:justify-self-end">
+                <span className="flex gap-4 lg:items-center lg:justify-end lg:self-stretch lg:border-l lg:border-line lg:gap-3 lg:pl-4">
                   <button
                     type="button"
                     onClick={() => setAdjusting(p)}
@@ -258,12 +429,19 @@ export default function InventarioPage() {
                   </button>
                 </span>
               ) : (
-                <span />
+                <span className="hidden lg:block lg:self-stretch lg:border-l lg:border-line" />
               )}
             </li>
           ))}
         </ul>
       </div>
+
+      {onlyLowMovement && (
+        <p className="mt-3 text-xs leading-relaxed text-dim">
+          Bajo movimiento con datos de ejemplo — en operación real se calcula con las ventas
+          registradas de los últimos 30 días.
+        </p>
+      )}
 
       {pageCount > 1 && (
         <div className="mt-6 flex items-center justify-between">
@@ -438,7 +616,11 @@ export default function InventarioPage() {
             <Button
               className="w-full"
               onClick={saveProduct}
-              disabled={!editing.name.trim() || !editing.sku.trim() || editing.price <= 0}
+              disabled={
+                !editing.name.trim() ||
+                !editing.sku.trim() ||
+                (editing.category !== "insumo" && editing.price <= 0)
+              }
             >
               {isNew ? "Crear producto" : "Guardar cambios"}
             </Button>
@@ -451,7 +633,12 @@ export default function InventarioPage() {
           product={adjusting}
           onClose={() => setAdjusting(null)}
           onApply={(delta) => {
-            adjustStock(adjusting.id, delta, user ? `${user.roleLabel} · ${user.name}` : undefined);
+            adjustStock(
+              adjusting.id,
+              delta,
+              user ? `${user.roleLabel} · ${user.name}` : undefined,
+              actor,
+            );
             setAdjusting(null);
           }}
         />
@@ -461,6 +648,7 @@ export default function InventarioPage() {
         <MovementsModal
           movements={movements}
           products={products}
+          transfers={transfers}
           family={family}
           onClose={() => setShowMovements(false)}
         />
@@ -474,25 +662,37 @@ const MOVEMENT_LABELS: Record<MovementType, string> = {
   venta_presencial: "Venta recepción",
   venta_online: "Venta online",
   ajuste: "Ajuste",
+  traspaso: "Traspaso entre bodegas",
 };
 
 function MovementsModal({
   movements,
   products,
+  transfers,
   family,
   onClose,
 }: {
   movements: InventoryMovement[];
   products: Product[];
+  transfers: Transfer[];
   family: ProductCategory;
   onClose: () => void;
 }) {
   const byId = new Map(products.map((p) => [p.id, p]));
+  const transferById = new Map(transfers.map((t) => [t.id, t]));
   // Solo los movimientos de la familia del área activa (carta o sexshop).
   const recent = [...movements]
     .filter((m) => byId.get(m.productId)?.category === family)
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, 50);
+
+  function movementLabel(m: InventoryMovement): string {
+    if (m.type === "traspaso" && m.refId) {
+      const t = transferById.get(m.refId);
+      if (t) return `Traspaso ${warehouseName(t.from)} → ${warehouseName(t.to)}`;
+    }
+    return MOVEMENT_LABELS[m.type];
+  }
 
   return (
     <Modal title="Movimientos de inventario" subtitle="Historial del stock" onClose={onClose}>
@@ -507,7 +707,7 @@ function MovementsModal({
                   {byId.get(m.productId)?.name ?? m.productId}
                 </p>
                 <p className="text-xs text-dim">
-                  {MOVEMENT_LABELS[m.type]} · {formatDateTime(new Date(m.at))}
+                  {movementLabel(m)} · {formatDateTime(new Date(m.at))}
                   {m.user ? ` · ${m.user}` : ""}
                 </p>
               </div>

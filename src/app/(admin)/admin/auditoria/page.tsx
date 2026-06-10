@@ -32,6 +32,7 @@ const ROLE_LABEL: Record<Role, string> = {
   admin: "Administración",
   aseo: "Aseo",
   encargado: "Encargado",
+  dueno: "Dueño",
 };
 
 const TYPE_FILTERS: { value: string; label: string }[] = [
@@ -95,8 +96,8 @@ export default function AuditoriaPage() {
     setPage(0);
   }, [q, typeFilter, fromDate, toDate]);
 
-  // Auditoría es exclusiva de Administración.
-  if (user && user.role !== "admin") {
+  // Auditoría es material de Administración y del Dueño (solo lectura).
+  if (user && user.role !== "admin" && user.role !== "dueno") {
     return (
       <div className="mx-auto max-w-md py-16 text-center">
         <span className="kicker text-gold">Auditoría</span>

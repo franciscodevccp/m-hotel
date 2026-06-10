@@ -1,12 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
+import { PRODUCT_SALES_30D } from "@/data/history";
+import { centralOf, totalOf } from "@/lib/inventory";
 import { formatCLP, formatDateTime } from "@/lib/format";
 import { useAppStore } from "@/lib/store";
-import type { Product } from "@/types";
+import type { Product, ProductCategory } from "@/types";
+
+const FAMILY_OPTIONS: { value: string; label: string }[] = [
+  { value: "all", label: "Todo el recinto" },
+  { value: "carta", label: "Carta / room service" },
+  { value: "sexshop", label: "Sexshop" },
+  { value: "insumo", label: "Insumos" },
+];
+
+const SCOPE_OPTIONS = [
+  { value: "total", label: "Recepción + central" },
+  { value: "recepcion", label: "Solo recepción" },
+  { value: "central", label: "Solo bodega central" },
+];
 
 const STOCK_OPTIONS = [
   { value: "all", label: "Todos" },
@@ -15,18 +30,37 @@ const STOCK_OPTIONS = [
   { value: "in", label: "En stock" },
 ];
 
+const MOVEMENT_OPTIONS = [
+  { value: "all", label: "Todos" },
+  { value: "con", label: "Con ventas (30 d)" },
+  { value: "sin", label: "Sin ventas (30 d)" },
+];
+
 const SORT_OPTIONS = [
   { value: "name", label: "Nombre (A–Z)" },
   { value: "stock-asc", label: "Stock: menor a mayor" },
   { value: "stock-desc", label: "Stock: mayor a menor" },
   { value: "price-asc", label: "Precio: menor a mayor" },
   { value: "price-desc", label: "Precio: mayor a menor" },
+  { value: "value-desc", label: "Valor en stock: mayor a menor" },
 ];
 
-/** Estado de stock de un producto para el informe. */
-function stockState(p: Product): "out" | "low" | "ok" {
-  if (p.stock === 0) return "out";
-  if (p.stock <= p.lowStockThreshold) return "low";
+/** Saldo del producto según la bodega elegida para el informe. */
+function scopeStock(p: Product, scope: string): number {
+  if (scope === "recepcion") return p.stock;
+  if (scope === "central") return centralOf(p);
+  return totalOf(p);
+}
+
+/** Precio unitario del informe: los insumos se valorizan al costo. */
+function unitValue(p: Product): number {
+  return p.category === "insumo" ? (p.cost ?? 0) : p.price;
+}
+
+function stockState(p: Product, scope: string): "out" | "low" | "ok" {
+  const saldo = scopeStock(p, scope);
+  if (saldo === 0) return "out";
+  if (saldo <= p.lowStockThreshold) return "low";
   return "ok";
 }
 const STATE_LABEL = { out: "Agotado", low: "Stock bajo", ok: "En stock" };
@@ -34,20 +68,36 @@ const STATE_LABEL = { out: "Agotado", low: "Stock bajo", ok: "En stock" };
 /** Botón + modal de filtros que genera y descarga un informe de stock en PDF. */
 export function StockReportButton({
   products,
-  groups,
-  areaLabel,
+  initialFamily,
 }: {
   products: Product[];
-  groups: string[];
-  areaLabel: string;
+  initialFamily: ProductCategory;
 }) {
   const { settings } = useAppStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [family, setFamily] = useState<string>(initialFamily);
   const [group, setGroup] = useState("all");
+  const [scope, setScope] = useState("total");
   const [stock, setStock] = useState("all");
+  const [movement, setMovement] = useState("all");
   const [sort, setSort] = useState("name");
   const [onlyActive, setOnlyActive] = useState(true);
+
+  // Las sub-categorías disponibles dependen de la familia elegida.
+  const groups = useMemo(() => {
+    const seen: string[] = [];
+    for (const p of products) {
+      if (family !== "all" && p.category !== family) continue;
+      if (p.group && !seen.includes(p.group)) seen.push(p.group);
+    }
+    return seen.sort((a, b) => a.localeCompare(b, "es"));
+  }, [products, family]);
+
+  function selectFamily(next: string) {
+    setFamily(next);
+    setGroup("all");
+  }
 
   async function generate() {
     setBusy(true);
@@ -56,31 +106,46 @@ export function StockReportButton({
       const autoTable = (await import("jspdf-autotable")).default;
 
       let list = products.filter((p) => (onlyActive ? p.active : true));
+      if (family !== "all") list = list.filter((p) => p.category === family);
       if (group !== "all") list = list.filter((p) => (p.group ?? "") === group);
-      if (stock === "low") list = list.filter((p) => p.stock > 0 && p.stock <= p.lowStockThreshold);
-      else if (stock === "out") list = list.filter((p) => p.stock === 0);
-      else if (stock === "in") list = list.filter((p) => p.stock > p.lowStockThreshold);
+      if (stock !== "all") list = list.filter((p) => {
+        const state = stockState(p, scope);
+        return stock === "low" ? state === "low" : stock === "out" ? state === "out" : state === "ok";
+      });
+      if (movement !== "all") {
+        list = list.filter((p) => {
+          if (p.category === "insumo") return movement === "all";
+          const sales = PRODUCT_SALES_30D[p.id] ?? 0;
+          return movement === "sin" ? sales === 0 : sales > 0;
+        });
+      }
 
       list = [...list].sort((a, b) => {
         switch (sort) {
           case "stock-asc":
-            return a.stock - b.stock;
+            return scopeStock(a, scope) - scopeStock(b, scope);
           case "stock-desc":
-            return b.stock - a.stock;
+            return scopeStock(b, scope) - scopeStock(a, scope);
           case "price-asc":
-            return a.price - b.price;
+            return unitValue(a) - unitValue(b);
           case "price-desc":
-            return b.price - a.price;
+            return unitValue(b) - unitValue(a);
+          case "value-desc":
+            return unitValue(b) * scopeStock(b, scope) - unitValue(a) * scopeStock(a, scope);
           default:
-            return a.name.localeCompare(b.name);
+            return a.name.localeCompare(b.name, "es");
         }
       });
 
-      const totalUnits = list.reduce((s, p) => s + p.stock, 0);
-      const totalValue = list.reduce((s, p) => s + p.stock * p.price, 0);
+      const totalUnits = list.reduce((s, p) => s + scopeStock(p, scope), 0);
+      const totalValue = list.reduce((s, p) => s + scopeStock(p, scope) * unitValue(p), 0);
+      const familyLabel = FAMILY_OPTIONS.find((o) => o.value === family)?.label ?? family;
       const filtersSummary = [
+        `Familia: ${familyLabel}`,
         `Categoría: ${group === "all" ? "Todas" : group}`,
+        `Bodega: ${SCOPE_OPTIONS.find((o) => o.value === scope)?.label}`,
         `Stock: ${STOCK_OPTIONS.find((o) => o.value === stock)?.label}`,
+        `Movimiento: ${MOVEMENT_OPTIONS.find((o) => o.value === movement)?.label}`,
         `Orden: ${SORT_OPTIONS.find((o) => o.value === sort)?.label}`,
         onlyActive ? "Solo activos" : "Incluye inactivos",
       ].join("   ·   ");
@@ -109,27 +174,35 @@ export function StockReportButton({
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       doc.setTextColor(111, 104, 95);
-      doc.text(`${areaLabel}  ·  Generado ${formatDateTime(new Date())}`, left, 108);
+      doc.text(`Inventario · ${familyLabel}  ·  Generado ${formatDateTime(new Date())}`, left, 108);
       doc.setTextColor(90, 84, 76);
       doc.text(filtersSummary, left, 122, { maxWidth: pageW - left * 2 });
 
       if (list.length === 0) {
         doc.setFontSize(11);
         doc.setTextColor(138, 131, 125);
-        doc.text("No hay productos para estos filtros.", left, 160);
+        doc.text("No hay productos para estos filtros.", left, 168);
       } else {
-        const head = [["Producto", "Categoría", "Precio unitario", "Stock", "Estado", "Valor en stock"]];
-        const body = list.map((p) => [
-          p.name + (p.ageRestricted ? "  (+18)" : ""),
-          p.group ?? "-",
-          formatCLP(p.price),
-          String(p.stock),
-          STATE_LABEL[stockState(p)],
-          formatCLP(p.price * p.stock),
-        ]);
+        const head = [
+          ["Producto", "Categoría", "Precio unitario", "Recep.", "Central", "Total", "Estado", "Valor en stock"],
+        ];
+        const body = list.map((p) => {
+          const unit = unitValue(p);
+          const central = centralOf(p);
+          return [
+            p.name + (p.ageRestricted ? "  (+18)" : ""),
+            p.group ?? "-",
+            formatCLP(unit),
+            String(p.stock),
+            String(central),
+            String(p.stock + central),
+            STATE_LABEL[stockState(p, scope)],
+            formatCLP(unit * scopeStock(p, scope)),
+          ];
+        });
 
         autoTable(doc, {
-          startY: 144,
+          startY: 150,
           head,
           body,
           theme: "striped",
@@ -150,11 +223,13 @@ export function StockReportButton({
           alternateRowStyles: { fillColor: [250, 247, 241] },
           columnStyles: {
             2: { halign: "right" },
-            3: { halign: "right", cellWidth: 46 },
-            5: { halign: "right" },
+            3: { halign: "right", cellWidth: 38 },
+            4: { halign: "right", cellWidth: 40 },
+            5: { halign: "right", cellWidth: 36 },
+            7: { halign: "right" },
           },
           didParseCell: (data) => {
-            if (data.section === "body" && data.column.index === 4) {
+            if (data.section === "body" && data.column.index === 6) {
               const raw = String(data.cell.raw);
               if (raw === "Agotado") {
                 data.cell.styles.textColor = [163, 39, 28];
@@ -187,9 +262,10 @@ export function StockReportButton({
         doc.line(left, y, right, y);
         y += 24;
 
+        const scopeLabel = SCOPE_OPTIONS.find((o) => o.value === scope)?.label ?? "";
         const summary: [string, string][] = [
           ["Total de productos", String(list.length)],
-          ["Total de stock", `${totalUnits} unidades`],
+          [`Total de stock (${scopeLabel.toLowerCase()})`, `${totalUnits} unidades`],
         ];
         doc.setFontSize(10);
         for (const [label, value] of summary) {
@@ -233,23 +309,50 @@ export function StockReportButton({
       {open && (
         <Modal title="Informe de stock" subtitle="Filtros del PDF" onClose={() => setOpen(false)}>
           <div className="space-y-4">
-            <div>
-              <label className="kicker text-dim">Categoría</label>
-              <Select
-                value={group}
-                onValueChange={setGroup}
-                ariaLabel="Categoría"
-                options={[
-                  { value: "all", label: "Todas las categorías" },
-                  ...groups.map((g) => ({ value: g, label: g })),
-                ]}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="kicker text-dim">Familia</label>
+                <Select
+                  value={family}
+                  onValueChange={selectFamily}
+                  ariaLabel="Familia"
+                  options={FAMILY_OPTIONS}
+                />
+              </div>
+              <div>
+                <label className="kicker text-dim">Categoría</label>
+                <Select
+                  value={group}
+                  onValueChange={setGroup}
+                  ariaLabel="Categoría"
+                  options={[
+                    { value: "all", label: "Todas las categorías" },
+                    ...groups.map((g) => ({ value: g, label: g })),
+                  ]}
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
+                <label className="kicker text-dim">Bodega a evaluar</label>
+                <Select value={scope} onValueChange={setScope} ariaLabel="Bodega" options={SCOPE_OPTIONS} />
+              </div>
+              <div>
                 <label className="kicker text-dim">Nivel de stock</label>
                 <Select value={stock} onValueChange={setStock} ariaLabel="Nivel de stock" options={STOCK_OPTIONS} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="kicker text-dim">Movimiento (30 d)</label>
+                <Select
+                  value={movement}
+                  onValueChange={setMovement}
+                  ariaLabel="Movimiento"
+                  options={MOVEMENT_OPTIONS}
+                />
               </div>
               <div>
                 <label className="kicker text-dim">Ordenar por</label>
@@ -266,6 +369,11 @@ export function StockReportButton({
               />
               <span className="text-sm text-muted">Solo productos activos</span>
             </label>
+
+            <p className="text-xs leading-relaxed text-dim">
+              El nivel de stock, el orden y los totales se calculan sobre la bodega elegida. Los
+              insumos se valorizan al costo; el resto, a precio de venta.
+            </p>
 
             <Button className="w-full" onClick={generate} disabled={busy}>
               {busy ? "Generando…" : "Descargar PDF"}

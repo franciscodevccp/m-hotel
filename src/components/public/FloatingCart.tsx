@@ -10,7 +10,7 @@ import { formatCLP } from "@/lib/format";
 import { makeId } from "@/lib/id";
 import { formatRut } from "@/lib/rut";
 import { useAppStore } from "@/lib/store";
-import type { ShopFulfillment, ShopOrder, ShopPaymentMethod } from "@/types";
+import type { Coupon, ShopFulfillment, ShopOrder, ShopPaymentMethod } from "@/types";
 
 type View = "cart" | "method" | "checkout" | "identify" | "done" | "rejected";
 
@@ -23,7 +23,8 @@ const methodCard =
 export function FloatingCart() {
   const pathname = usePathname();
   const { items, count, subtotal, hydrated, setQty, add, remove, clear } = useCart();
-  const { shopSettings, shopOrders, rooms, reservations, addShopOrder } = useAppStore();
+  const { shopSettings, shopOrders, rooms, reservations, coupons, addShopOrder, updateCoupon } =
+    useAppStore();
 
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View>("cart");
@@ -40,6 +41,10 @@ export function FloatingCart() {
   const [comuna, setComuna] = useState(shopSettings.shippingComunas[0] ?? "");
   // Datos del pedido a la habitación
   const [roomNumber, setRoomNumber] = useState("");
+  // Cupón de descuento
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
 
   const paymentOptions = [
     shopSettings.payments.webpay ? { value: "webpay", label: "Webpay" } : null,
@@ -63,8 +68,48 @@ export function FloatingCart() {
 
   const freeShipping =
     shopSettings.freeShippingThreshold > 0 && subtotal >= shopSettings.freeShippingThreshold;
-  const shipping = fulfillment === "despacho" ? (freeShipping ? 0 : shopSettings.shippingCost) : 0;
-  const total = subtotal + shipping;
+  // El envío gratis del cupón se resuelve ANTES de calcular el total.
+  const couponFreeShipping = appliedCoupon?.type === "envio_gratis";
+  const shipping =
+    fulfillment === "despacho" && !couponFreeShipping
+      ? freeShipping
+        ? 0
+        : shopSettings.shippingCost
+      : 0;
+  const discount = !appliedCoupon
+    ? 0
+    : appliedCoupon.type === "porcentaje"
+      ? Math.round((subtotal * appliedCoupon.value) / 100)
+      : appliedCoupon.type === "monto"
+        ? Math.min(appliedCoupon.value, subtotal)
+        : 0;
+  const total = subtotal + shipping - discount;
+
+  function applyCoupon() {
+    const code = couponInput.trim().toUpperCase();
+    if (!code) return;
+    const coupon = coupons.find((c) => c.code.toUpperCase() === code);
+    if (!coupon || !coupon.active) {
+      setAppliedCoupon(null);
+      setCouponError("El cupón no es válido.");
+      return;
+    }
+    if (subtotal < coupon.minPurchase) {
+      setAppliedCoupon(null);
+      setCouponError(
+        `Este cupón requiere una compra mínima de ${formatCLP(coupon.minPurchase)}.`,
+      );
+      return;
+    }
+    setAppliedCoupon(coupon);
+    setCouponError(null);
+  }
+
+  function removeCoupon() {
+    setAppliedCoupon(null);
+    setCouponInput("");
+    setCouponError(null);
+  }
 
   const validCheckout =
     name.trim() !== "" &&
@@ -87,6 +132,9 @@ export function FloatingCart() {
     setRoomNumber("");
     setPayment(paymentOptions[0]?.value ?? "webpay");
     setLastRoomLabel(null);
+    setCouponInput("");
+    setAppliedCoupon(null);
+    setCouponError(null);
   }
 
   function placeOrder() {
@@ -111,12 +159,14 @@ export function FloatingCart() {
       })),
       subtotal,
       shipping,
-      discount: 0,
+      discount,
+      couponCode: appliedCoupon?.code,
       total,
       status: "pendiente",
       createdAt: new Date().toISOString(),
     };
     addShopOrder(order);
+    if (appliedCoupon) updateCoupon({ ...appliedCoupon, uses: appliedCoupon.uses + 1 });
     setLastFolio(folio);
     setLastRoomLabel(null);
     clear();
@@ -404,6 +454,51 @@ export function FloatingCart() {
                       options={paymentOptions}
                     />
                   </div>
+                  <div>
+                    <label className="kicker text-dim" htmlFor="ck-coupon">
+                      Cupón de descuento (opcional)
+                    </label>
+                    {appliedCoupon ? (
+                      <div className="mt-2 flex items-baseline justify-between border border-gold/40 bg-surface px-3 py-2.5">
+                        <span className="text-sm text-gold">
+                          Cupón {appliedCoupon.code}:{" "}
+                          {appliedCoupon.type === "envio_gratis"
+                            ? "envío gratis"
+                            : `−${formatCLP(discount)}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={removeCoupon}
+                          className="text-xs uppercase tracking-[0.14em] text-dim transition-colors hover:text-busy"
+                        >
+                          Quitar
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          id="ck-coupon"
+                          value={couponInput}
+                          onChange={(e) => {
+                            setCouponInput(e.target.value.toUpperCase());
+                            setCouponError(null);
+                          }}
+                          placeholder="BIENVENIDA10"
+                          className="min-h-[44px] w-full rounded-sm border border-line bg-surface px-3 py-2.5 text-sm uppercase text-cream placeholder:normal-case placeholder:text-dim focus:border-gold/60 focus-visible:outline-none"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={applyCoupon}
+                          disabled={!couponInput.trim()}
+                          className="shrink-0"
+                        >
+                          Aplicar
+                        </Button>
+                      </div>
+                    )}
+                    {couponError && <p className="mt-2 text-xs text-busy">{couponError}</p>}
+                  </div>
                 </div>
               )}
 
@@ -499,9 +594,33 @@ export function FloatingCart() {
 
               {view === "checkout" && (
                 <>
-                  <div className="mb-3 flex items-baseline justify-between border-t border-line pt-3">
-                    <span className="kicker text-dim">Total</span>
-                    <span className="tnum font-display text-xl text-gold">{formatCLP(total)}</span>
+                  <div className="mb-3 space-y-1 border-t border-line pt-3">
+                    <div className="flex items-baseline justify-between text-xs">
+                      <span className="text-muted">Subtotal</span>
+                      <span className="tnum text-muted">{formatCLP(subtotal)}</span>
+                    </div>
+                    {fulfillment === "despacho" && (
+                      <div className="flex items-baseline justify-between text-xs">
+                        <span className="text-muted">Envío</span>
+                        <span className="tnum text-muted">
+                          {shipping === 0
+                            ? couponFreeShipping
+                              ? "Gratis · cupón"
+                              : "Gratis"
+                            : formatCLP(shipping)}
+                        </span>
+                      </div>
+                    )}
+                    {discount > 0 && appliedCoupon && (
+                      <div className="flex items-baseline justify-between text-xs">
+                        <span className="text-gold">Cupón {appliedCoupon.code}</span>
+                        <span className="tnum text-gold">−{formatCLP(discount)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-baseline justify-between pt-1">
+                      <span className="kicker text-dim">Total</span>
+                      <span className="tnum font-display text-xl text-gold">{formatCLP(total)}</span>
+                    </div>
                   </div>
                   {!shopSettings.storeOnline && (
                     <p className="mb-3 text-xs text-busy">La tienda está en mantención por ahora.</p>

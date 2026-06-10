@@ -43,6 +43,7 @@ export default function RoomServicePage() {
   } = useAppStore();
   const { user } = useSession();
   const userLabel = user ? `${user.roleLabel} · ${user.name}` : "Recepción";
+  const actor = user ? { name: user.name, role: user.role } : undefined;
 
   const sellable = products.filter((p) => p.active && p.channels.includes("room_service"));
   const nameById = new Map(products.map((p) => [p.id, p.name]));
@@ -169,7 +170,7 @@ export default function RoomServicePage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => deliverRoomServiceOrder(o.id, userLabel)}
+                        onClick={() => deliverRoomServiceOrder(o.id, userLabel, actor)}
                         className="border border-line px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-muted transition-colors hover:border-gold/70 hover:text-gold"
                       >
                         Entregar

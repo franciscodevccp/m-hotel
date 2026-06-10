@@ -39,6 +39,12 @@ export const SESSION_USERS: Record<Role, SessionUser> = {
     roleLabel: "Encargado",
     context: "Inventario y compras",
   },
+  dueno: {
+    role: "dueno",
+    name: "Rodrigo",
+    roleLabel: "Dueño",
+    context: "Solo lectura",
+  },
 };
 
 interface SessionStore {
@@ -47,6 +53,8 @@ interface SessionStore {
   area: AdminArea;
   /** true una vez leído localStorage en el cliente. */
   hydrated: boolean;
+  /** true si el perfil activo es de solo lectura (rol Dueño). */
+  readOnly: boolean;
   login: (role: Role) => void;
   logout: () => void;
   setArea: (area: AdminArea) => void;
@@ -65,7 +73,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const role = JSON.parse(raw) as Role;
-        if (role === "recepcion" || role === "admin" || role === "aseo" || role === "encargado") {
+        if (
+          role === "recepcion" ||
+          role === "admin" ||
+          role === "aseo" ||
+          role === "encargado" ||
+          role === "dueno"
+        ) {
           // eslint-disable-next-line react-hooks/set-state-in-effect -- hidratación única desde localStorage en el cliente
           setUser(SESSION_USERS[role]);
         }
@@ -112,7 +126,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <SessionContext.Provider value={{ user, area, hydrated, login, logout, setArea }}>
+    <SessionContext.Provider
+      value={{ user, area, hydrated, readOnly: user?.role === "dueno", login, logout, setArea }}
+    >
       {children}
     </SessionContext.Provider>
   );

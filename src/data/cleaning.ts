@@ -3,23 +3,41 @@ import type { CleaningLogEntry } from "@/types";
 /** Personal de aseo (mucamas) de la demo. */
 export const CLEANING_STAFF = ["Rosa Muñoz", "Marta Pino", "Carla Soto", "Lucía Vera"];
 
-// Historial de limpiezas terminadas (placeholders). Quién, cuándo y cuánto se
-// demoró. Determinístico. Hoy de la demo: 2026-06-09.
-export const SEED_CLEANING_LOG: CleaningLogEntry[] = [
-  { id: "cl-16", roomId: "105", by: "Rosa Muñoz", at: "2026-06-09T18:40:00", minutes: 18 },
-  { id: "cl-15", roomId: "201", by: "Marta Pino", at: "2026-06-09T17:55:00", minutes: 26 },
-  { id: "cl-14", roomId: "302", by: "Carla Soto", at: "2026-06-09T16:30:00", minutes: 31 },
-  { id: "cl-13", roomId: "108", by: "Rosa Muñoz", at: "2026-06-09T15:10:00", minutes: 14 },
-  { id: "cl-12", roomId: "401", by: "Lucía Vera", at: "2026-06-09T13:45:00", minutes: 38 },
-  { id: "cl-11", roomId: "203", by: "Marta Pino", at: "2026-06-09T12:20:00", minutes: 22 },
-  { id: "cl-10", roomId: "102", by: "Rosa Muñoz", at: "2026-06-08T23:05:00", minutes: 16 },
-  { id: "cl-9", roomId: "206", by: "Carla Soto", at: "2026-06-08T21:40:00", minutes: 28 },
-  { id: "cl-8", roomId: "304", by: "Lucía Vera", at: "2026-06-08T20:15:00", minutes: 33 },
-  { id: "cl-7", roomId: "107", by: "Marta Pino", at: "2026-06-08T18:50:00", minutes: 19 },
-  { id: "cl-6", roomId: "205", by: "Rosa Muñoz", at: "2026-06-08T17:25:00", minutes: 21 },
-  { id: "cl-5", roomId: "402", by: "Carla Soto", at: "2026-06-07T22:30:00", minutes: 35 },
-  { id: "cl-4", roomId: "104", by: "Lucía Vera", at: "2026-06-07T20:10:00", minutes: 17 },
-  { id: "cl-3", roomId: "202", by: "Marta Pino", at: "2026-06-07T18:35:00", minutes: 24 },
-  { id: "cl-2", roomId: "301", by: "Rosa Muñoz", at: "2026-06-06T23:15:00", minutes: 29 },
-  { id: "cl-1", roomId: "106", by: "Carla Soto", at: "2026-06-06T21:00:00", minutes: 20 },
-];
+/**
+ * 30 días de limpiezas (2026-05-11 → 2026-06-09), determinístico (corre en
+ * módulo, una vez, con valores fijos: SSR y cliente idénticos). Cuatro perfiles
+ * de rendimiento distinguibles: Rosa rápida (~16 m), Marta media (~22 m),
+ * Carla media (~26 m) y Lucía lenta (~33 m). Fin de semana con más movimiento.
+ */
+function genCleaningLog(): CleaningLogEntry[] {
+  const staff = CLEANING_STAFF;
+  const roomIds = [
+    "101", "102", "103", "104", "105", "106", "108",
+    "201", "202", "203", "204", "205", "206",
+    "301", "302", "303", "304", "401", "402",
+  ];
+  const entries: CleaningLogEntry[] = [];
+  let n = 0;
+  for (let d = 0; d < 30; d++) {
+    const date = new Date(2026, 4, 11 + d); // mayo es mes 4
+    const isWeekend = [5, 6, 0].includes(date.getDay());
+    const cleanings = isWeekend ? 9 + (d % 3) : 5 + (d % 3);
+    for (let c = 0; c < cleanings; c++) {
+      n++;
+      const by = staff[(d + c) % 4];
+      const base = [16, 22, 26, 33][(d + c) % 4];
+      const minutes = base + ((n * 7) % 9) - 4; // variación ±4 determinística
+      const hour = 10 + ((c * 97) % 13); // 10:00–22:00
+      entries.push({
+        id: `cl-g${n}`,
+        roomId: roomIds[(n * 5) % roomIds.length],
+        by,
+        at: `2026-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String((n * 11) % 60).padStart(2, "0")}:00`,
+        minutes: Math.max(10, minutes),
+      });
+    }
+  }
+  return entries.reverse(); // más reciente primero
+}
+
+export const SEED_CLEANING_LOG: CleaningLogEntry[] = genCleaningLog();
