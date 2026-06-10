@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Fraunces, Instrument_Sans } from "next/font/google";
+import { Fraunces, Instrument_Sans, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
 import { SessionProvider } from "@/lib/session";
 import { AppStoreProvider } from "@/lib/store";
@@ -16,6 +16,13 @@ const instrument = Instrument_Sans({
   display: "swap",
 });
 
+// Fuente del panel admin: humanista y de alta legibilidad (ver .admin-ui).
+const sourceSans = Source_Sans_3({
+  subsets: ["latin"],
+  variable: "--font-source",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: "M Motel · Limache",
   description:
@@ -26,7 +33,10 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es" className={`${fraunces.variable} ${instrument.variable} h-full`}>
+    <html
+      lang="es"
+      className={`${fraunces.variable} ${instrument.variable} ${sourceSans.variable} h-full`}
+    >
       <body className="min-h-full antialiased">
         <SessionProvider>
           <AppStoreProvider>{children}</AppStoreProvider>

@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { AdminNav } from "@/components/admin/AdminNav";
+import { AdminThemeProvider } from "@/lib/adminTheme";
 import { useSession } from "@/lib/session";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -28,9 +29,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
   }, [isLogin, hydrated, user, pathname, router]);
 
-  // El login va a pantalla completa, sin el shell del panel.
+  // El login va a pantalla completa, sin el shell del panel (pero con el tema).
   if (isLogin) {
-    return <>{children}</>;
+    return <AdminThemeProvider>{children}</AdminThemeProvider>;
   }
 
   // Mientras hidrata o si no hay sesión, no pintamos el shell (evita parpadeo).
@@ -39,9 +40,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="min-h-full">
+    <AdminThemeProvider>
       <AdminNav />
       <main className="px-5 pb-20 pt-28 sm:px-8 lg:ml-64 lg:px-10 lg:pt-12">{children}</main>
-    </div>
+    </AdminThemeProvider>
   );
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useAdminTheme } from "@/lib/adminTheme";
 import { useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import type { AdminArea, Role } from "@/types";
@@ -140,6 +141,7 @@ export function AdminNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, area, setArea, logout } = useSession();
+  const { theme, toggle } = useAdminTheme();
 
   const isActive = (href: string) =>
     href === "/admin" || href === "/admin/tienda"
@@ -243,13 +245,22 @@ export function AdminNav() {
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={signOut}
-            className="mt-3 w-full rounded-sm border border-line px-3 py-2 text-xs uppercase tracking-[0.16em] text-muted transition-colors hover:border-gold/50 hover:text-gold"
-          >
-            Salir
-          </button>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={toggle}
+              className="rounded-sm border border-line px-3 py-2 text-xs uppercase tracking-[0.12em] text-muted transition-colors hover:border-gold/50 hover:text-gold"
+            >
+              {theme === "light" ? "Oscuro" : "Claro"}
+            </button>
+            <button
+              type="button"
+              onClick={signOut}
+              className="rounded-sm border border-line px-3 py-2 text-xs uppercase tracking-[0.12em] text-muted transition-colors hover:border-gold/50 hover:text-gold"
+            >
+              Salir
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -260,13 +271,22 @@ export function AdminNav() {
             <span className="font-display text-xl text-cream">M</span>
             <span className="kicker text-dim">{user?.roleLabel ?? "Panel"}</span>
           </div>
-          <button
-            type="button"
-            onClick={signOut}
-            className="text-xs uppercase tracking-[0.16em] text-dim"
-          >
-            Salir
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={toggle}
+              className="text-xs uppercase tracking-[0.16em] text-dim"
+            >
+              {theme === "light" ? "Oscuro" : "Claro"}
+            </button>
+            <button
+              type="button"
+              onClick={signOut}
+              className="text-xs uppercase tracking-[0.16em] text-dim"
+            >
+              Salir
+            </button>
+          </div>
         </div>
         {isAdmin && <div className="px-3 pb-2">{AreaSwitch}</div>}
         <nav className="flex gap-1 overflow-x-auto px-3 pb-2">

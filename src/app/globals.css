@@ -36,6 +36,37 @@
   --maint: #8a837d;
 }
 
+/* ----------------------------------------------------------------------------
+   Tema claro del panel admin (pedido del cliente: operación diaria más legible).
+   Redefine los tokens dentro del alcance .admin-light; el sitio público
+   conserva el tema oscuro de marca. Paleta papel cálido, nunca blanco clínico.
+---------------------------------------------------------------------------- */
+
+.admin-light {
+  --bg: #f4efe6;
+  --surface: #fbf8f2;
+  --surface-2: #ffffff;
+
+  --line: rgba(33, 28, 22, 0.12);
+  --line-strong: rgba(33, 28, 22, 0.24);
+
+  --text: #241f1a;
+  --text-muted: #5d564b;
+  --text-dim: #8a8174;
+
+  /* Dorado oscurecido para mantener contraste sobre fondos claros */
+  --gold: #97712a;
+  --gold-soft: #7c5a1d;
+
+  --wine: #8e2a3e;
+  --wine-soft: #a14a5b;
+
+  --ok: #517a3f;
+  --busy: #b1402e;
+  --clean: #97712a;
+  --maint: #7d766c;
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
@@ -247,4 +278,30 @@
   html {
     scroll-behavior: auto;
   }
+}
+
+/* ----------------------------------------------------------------------------
+   Tipografía del panel admin (fuera de @layer para ganar a las utilidades):
+   Source Sans 3 — humanista, abierta y de alta legibilidad — y cuerpos un
+   punto más grandes que el sitio público. Pedido del cliente: letras más
+   grandes y amigables para la operación diaria.
+---------------------------------------------------------------------------- */
+
+.admin-ui {
+  --font-sans: var(--font-source);
+  font-family: var(--font-source), ui-sans-serif, system-ui, sans-serif;
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+.admin-ui .text-sm {
+  font-size: 0.9375rem; /* 15px */
+}
+
+.admin-ui .text-xs {
+  font-size: 0.8125rem; /* 13px */
+}
+
+.admin-ui .kicker {
+  font-size: 0.78rem;
 }
