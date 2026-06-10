@@ -12,11 +12,47 @@ interface ScannerControls {
   stop: () => void;
 }
 
+/** Pictograma de QR para el estado en reposo (tres patrones de posición). */
+function QrGlyph() {
+  return (
+    <svg
+      viewBox="0 0 48 48"
+      aria-hidden
+      className="size-12 text-dim"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <rect x="4" y="4" width="14" height="14" />
+      <rect x="9" y="9" width="4" height="4" fill="currentColor" stroke="none" />
+      <rect x="30" y="4" width="14" height="14" />
+      <rect x="35" y="9" width="4" height="4" fill="currentColor" stroke="none" />
+      <rect x="4" y="30" width="14" height="14" />
+      <rect x="9" y="35" width="4" height="4" fill="currentColor" stroke="none" />
+      <path d="M28 28h6v6h-6zM38 28h6M44 34h-8v10M28 40h4" strokeWidth="2.4" />
+    </svg>
+  );
+}
+
+/** Esquinas de enfoque del visor: el lenguaje clásico de un lector QR. */
+function FinderCorners() {
+  const corner = "absolute size-8 border-gold";
+  return (
+    <div className="pointer-events-none absolute inset-5" aria-hidden>
+      <span className={cn(corner, "left-0 top-0 border-l-2 border-t-2")} />
+      <span className={cn(corner, "right-0 top-0 border-r-2 border-t-2")} />
+      <span className={cn(corner, "bottom-0 left-0 border-b-2 border-l-2")} />
+      <span className={cn(corner, "bottom-0 right-0 border-b-2 border-r-2")} />
+      <span className="qr-scanline" />
+    </div>
+  );
+}
+
 /**
  * Escáner del QR de habitación para el personal de aseo: reemplaza el
- * talonario de papel. Al leer el código, el aseo se inicia a nombre del
- * usuario de la sesión y el tiempo empieza a correr. El botón de ejemplo
- * permite demostrar el flujo sin tener el código impreso a mano.
+ * talonario de papel. Visor cuadrado con esquinas de enfoque (a diferencia
+ * del lector de cédula, que es apaisado). Al leer el código, el aseo se
+ * inicia a nombre del usuario de la sesión y el tiempo empieza a correr.
  */
 export function RoomQrScanModal({
   onRoom,
@@ -88,22 +124,18 @@ export function RoomQrScanModal({
   return (
     <Modal title="Escanear QR de habitación" subtitle="Inicio de aseo" onClose={onClose}>
       <div className="space-y-3">
-        <div className="relative overflow-hidden rounded-sm border border-line bg-bg">
+        {/* Visor cuadrado: el QR es cuadrado y se centra en las esquinas */}
+        <div className="relative mx-auto aspect-square w-full max-w-[260px] overflow-hidden rounded-sm border border-line bg-bg">
           <video
             ref={videoRef}
             autoPlay
             muted
             playsInline
-            className={cn("aspect-video max-h-[34vh] w-full object-cover", !scanning && "hidden")}
+            className={cn("absolute inset-0 size-full object-cover", !scanning && "hidden")}
           />
-          {scanning && (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-x-16 inset-y-5 rounded-sm border border-gold/50"
-            />
-          )}
+          {scanning && <FinderCorners />}
           {!scanning && (
-            <div className="flex w-full flex-col items-center justify-center gap-2.5 px-6 py-8 text-center">
+            <div className="flex size-full flex-col items-center justify-center gap-3 px-6 text-center">
               {state === "error" ? (
                 <>
                   <p className="text-sm text-busy">No se pudo acceder a la cámara.</p>
@@ -113,11 +145,12 @@ export function RoomQrScanModal({
                 </>
               ) : (
                 <>
+                  <QrGlyph />
                   <p className="text-sm text-cream">
-                    Apunta al código QR pegado en la habitación.
+                    Centra el código QR de la pieza en el recuadro.
                   </p>
                   <p className="text-xs leading-relaxed text-dim">
-                    El aseo queda a tu nombre y el tiempo empieza a correr de inmediato.
+                    El aseo queda a tu nombre y el tiempo corre de inmediato.
                   </p>
                 </>
               )}
@@ -126,7 +159,12 @@ export function RoomQrScanModal({
         </div>
 
         {scanning && (
-          <p className={cn("text-xs leading-relaxed", foreignCode ? "text-busy" : "text-muted")}>
+          <p
+            className={cn(
+              "text-center text-xs leading-relaxed",
+              foreignCode ? "text-busy" : "text-muted",
+            )}
+          >
             {state === "starting"
               ? "Activando la cámara…"
               : foreignCode

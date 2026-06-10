@@ -300,6 +300,32 @@
   }
 }
 
+/* Línea de barrido del escáner QR (sube y baja dentro del visor cuadrado) */
+@keyframes qr-scan {
+  0%,
+  100% {
+    top: 6%;
+  }
+  50% {
+    top: calc(94% - 2px);
+  }
+}
+
+.qr-scanline {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--gold) 85%, transparent) 50%,
+    transparent 100%
+  );
+  animation: qr-scan 2.4s ease-in-out infinite;
+}
+
 /* Decisión de la demo: las animaciones de entrada (hero y reveals) se fuerzan
    siempre, por eso no se neutralizan bajo prefers-reduced-motion. Solo se desactiva
    el scroll suave, que es molesto con movimiento reducido. */
