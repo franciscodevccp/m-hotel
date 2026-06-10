@@ -316,19 +316,6 @@ export interface LinenIncident {
   at: string; // ISO
 }
 
-export type ReceivableStatus = "pendiente" | "pagada";
-
-/** Cuenta por cobrar: consumo o estancia pendiente de pago. */
-export interface Receivable {
-  id: string;
-  customer: string;
-  roomId?: string;
-  concept: string;
-  amount: number;
-  createdAt: string; // ISO
-  status: ReceivableStatus;
-}
-
 export type RoomServiceStatus = "preparando" | "entregado" | "cancelado";
 
 export interface RoomServiceItem {

@@ -40,7 +40,6 @@ const MOTEL_GROUPS: NavGroup[] = [
       { href: "/admin/lavanderia", label: "Lavandería", roles: STAFF },
       { href: "/admin/blancos", label: "Blancos", roles: STAFF },
       { href: "/admin/anomalias", label: "Anomalías", roles: STAFF },
-      { href: "/admin/cuentas", label: "Cuentas por cobrar", roles: BOTH },
     ],
   },
   {
@@ -69,6 +68,7 @@ const MOTEL_GROUPS: NavGroup[] = [
     title: "Configuración",
     links: [
       { href: "/admin/configuracion", label: "Configuración", roles: ADMIN },
+      { href: "/admin/qr-habitaciones", label: "QR de habitaciones", roles: ADMIN },
       { href: "/admin/auditoria", label: "Auditoría", roles: ADMIN },
     ],
   },

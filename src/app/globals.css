@@ -34,6 +34,21 @@
   --busy: #b25a4e;
   --clean: #c9a24a;
   --maint: #8a837d;
+
+  /* Tablero de habitaciones: tarjeta completa coloreada por estado
+     (pedido del cliente: verde libre, azul ocupada, ámbar limpieza, gris mantención) */
+  --room-free-bg: rgba(124, 154, 107, 0.16);
+  --room-free-line: rgba(124, 154, 107, 0.55);
+  --room-free-fg: #abc79a;
+  --room-occ-bg: rgba(96, 138, 177, 0.18);
+  --room-occ-line: rgba(96, 138, 177, 0.6);
+  --room-occ-fg: #a9c7e0;
+  --room-clean-bg: rgba(201, 162, 74, 0.15);
+  --room-clean-line: rgba(201, 162, 74, 0.55);
+  --room-clean-fg: #ddba70;
+  --room-maint-bg: rgba(150, 142, 132, 0.14);
+  --room-maint-line: rgba(150, 142, 132, 0.45);
+  --room-maint-fg: #aaa39b;
 }
 
 /* ----------------------------------------------------------------------------
@@ -65,6 +80,20 @@
   --busy: #b1402e;
   --clean: #97712a;
   --maint: #7d766c;
+
+  /* Tablero de habitaciones en claro: pasteles saturados con texto profundo */
+  --room-free-bg: #e1eed9;
+  --room-free-line: #7da465;
+  --room-free-fg: #2f5a1d;
+  --room-occ-bg: #deeaf5;
+  --room-occ-line: #6c94b8;
+  --room-occ-fg: #29506f;
+  --room-clean-bg: #f8ebcf;
+  --room-clean-line: #c2902f;
+  --room-clean-fg: #775711;
+  --room-maint-bg: #eae7e1;
+  --room-maint-line: #9f9786;
+  --room-maint-fg: #57534b;
 }
 
 @theme inline {

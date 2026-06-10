@@ -20,7 +20,6 @@ import { SEED_PACKAGES } from "@/data/packages";
 import { SEED_DISCOUNTS, SEED_PROMOTIONS } from "@/data/pricingRules";
 import { PRODUCT_CATEGORIES, SEED_MOVEMENTS, SEED_PRODUCTS } from "@/data/products";
 import { PROVIDERS, SEED_PURCHASES } from "@/data/purchases";
-import { SEED_RECEIVABLES } from "@/data/receivables";
 import { SEED_RESERVATIONS } from "@/data/reservations";
 import { SEED_ROOM_SERVICE } from "@/data/roomService";
 import { SEED_SHOP_ORDERS } from "@/data/shopOrders";
@@ -64,7 +63,6 @@ import type {
   Promotion,
   Provider,
   Purchase,
-  Receivable,
   Reservation,
   Room,
   RoomServiceOrder,
@@ -103,6 +101,16 @@ const ROOM_STATUS_LABEL: Record<RoomStatus, string> = {
   cleaning: "Limpieza",
   maintenance: "Mantención",
 };
+
+/**
+ * Cortesías de apertura: se registran solas con cada check-in (pedido del
+ * cliente: que queden establecidas por abrir la habitación, sin buscarlas).
+ */
+const OPENING_COURTESIES: { productId: string; quantity: number; label: string }[] = [
+  { productId: "p-769284017", quantity: 2, label: "Alkas" },
+  { productId: "p-7802800535569", quantity: 1, label: "Papas Kryzpo" },
+  { productId: "p-261220243", quantity: 1, label: "Bomba de baño" },
+];
 
 let auditSeq = 0;
 
@@ -143,7 +151,6 @@ interface AppState {
   promotions: Promotion[];
   anomalies: Anomaly[];
   laundry: LaundryLoad[];
-  receivables: Receivable[];
   roomService: RoomServiceOrder[];
   settings: VenueSettings;
   users: StaffUser[];
@@ -209,7 +216,7 @@ interface AppStore extends AppState {
   /** Asigna (o reasigna) el personal de aseo a una habitación en limpieza. */
   assignCleaning: (roomId: string, staff: string) => void;
   /** Aseo empieza la limpieza de una habitación (queda "en proceso"). */
-  startCleaning: (roomId: string, by?: string) => void;
+  startCleaning: (roomId: string, by?: string, actor?: Actor) => void;
   /** Aseo marca la habitación lista: pasa a disponible y registra la limpieza. */
   finishCleaning: (roomId: string, actor?: Actor) => void;
   /** Aseo reporta mantención: la habitación pasa a mantención y deja una incidencia. */
@@ -226,10 +233,6 @@ interface AppStore extends AppState {
   takeLaundryLoad: (id: string, by?: string) => void;
   /** Registra un percance de blancos (mancha, rotura, pérdida, etc.). */
   addLinenIncident: (incident: LinenIncident) => void;
-  /** Crea una cuenta por cobrar. */
-  addReceivable: (receivable: Receivable) => void;
-  /** Marca una cuenta como pagada; el monto entra al corte del turno. */
-  markReceivablePaid: (id: string, method: PaymentMethod, actor?: Actor) => void;
   /** Crea un pedido de room service (queda en preparación). */
   addRoomServiceOrder: (order: RoomServiceOrder) => void;
   /** Entrega el pedido: baja stock de cada ítem y cobra el total al corte. */
@@ -249,6 +252,8 @@ interface AppStore extends AppState {
   checkOut: (roomId: string, method?: PaymentMethod, user?: string, actor?: Actor) => void;
   /** Cambio de pieza: traslada la estancia en curso a otra habitación disponible. */
   moveRoom: (fromId: string, toId: string, actor?: Actor) => void;
+  /** Registra una cortesía a la habitación (sin cobro): baja stock con rastro. */
+  logCourtesy: (roomId: string, productId: string, quantity: number, actor?: Actor) => void;
   /** Ampliar estancia: extiende el término y suma la hora adicional al total. */
   extendStay: (roomId: string, extraHours: number, actor?: Actor) => void;
   addTransaction: (transaction: Transaction, actor?: Actor) => void;
@@ -364,7 +369,6 @@ function seedState(): AppState {
     promotions: SEED_PROMOTIONS,
     anomalies: SEED_ANOMALIES,
     laundry: SEED_LAUNDRY,
-    receivables: SEED_RECEIVABLES,
     roomService: SEED_ROOM_SERVICE,
     settings: DEFAULT_SETTINGS,
     users: SEED_USERS,
@@ -435,7 +439,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           promotions: parsed.promotions ?? prev.promotions,
           anomalies: parsed.anomalies ?? prev.anomalies,
           laundry: parsed.laundry ?? prev.laundry,
-          receivables: parsed.receivables ?? prev.receivables,
           roomService: parsed.roomService ?? prev.roomService,
           settings: parsed.settings ?? prev.settings,
           users: parsed.users ?? prev.users,
@@ -553,19 +556,33 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const startCleaning = useCallback((roomId: string, by?: string) => {
-    setState((prev) => ({
-      ...prev,
-      rooms: prev.rooms.map((room) =>
-        room.id === roomId && room.status === "cleaning"
-          ? {
-              ...room,
-              cleaningStartedAt: new Date().toISOString(),
-              cleaningAssignee: by ?? room.cleaningAssignee,
-            }
-          : room,
-      ),
-    }));
+  const startCleaning = useCallback((roomId: string, by?: string, actor?: Actor) => {
+    setState((prev) => {
+      const room = prev.rooms.find((r) => r.id === roomId);
+      if (!room || room.status !== "cleaning") return prev;
+      return {
+        ...prev,
+        rooms: prev.rooms.map((r) =>
+          r.id === roomId
+            ? {
+                ...r,
+                cleaningStartedAt: new Date().toISOString(),
+                cleaningAssignee: by ?? r.cleaningAssignee,
+              }
+            : r,
+        ),
+        audit: [
+          auditEntry(
+            "estado",
+            "Inició el aseo",
+            "Limpieza",
+            `Habitación ${room.number}`,
+            actor ?? (by ? { name: by, role: "aseo" } : undefined),
+          ),
+          ...prev.audit,
+        ],
+      };
+    });
   }, []);
 
   const finishCleaning = useCallback((roomId: string, actor?: Actor) => {
@@ -735,38 +752,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, linenIncidents: [incident, ...prev.linenIncidents] }));
   }, []);
 
-  const addReceivable = useCallback((receivable: Receivable) => {
-    setState((prev) => ({ ...prev, receivables: [receivable, ...prev.receivables] }));
-  }, []);
-
-  const markReceivablePaid = useCallback((id: string, method: PaymentMethod, actor?: Actor) => {
-    setState((prev) => {
-      const receivable = prev.receivables.find((c) => c.id === id);
-      if (!receivable || receivable.status === "pagada") return prev;
-      const line = method === "cash" ? "cash" : "card";
-      return {
-        ...prev,
-        receivables: prev.receivables.map((c) =>
-          c.id === id ? { ...c, status: "pagada" } : c,
-        ),
-        shift: {
-          ...prev.shift,
-          [line]: addToLine(prev.shift[line], receivable.amount),
-        },
-        audit: [
-          auditEntry(
-            "estado",
-            "Cobró una cuenta pendiente",
-            "Cuentas",
-            `${receivable.customer} · ${formatCLP(receivable.amount)}`,
-            actor,
-          ),
-          ...prev.audit,
-        ],
-      };
-    });
-  }, []);
-
   const addRoomServiceOrder = useCallback((order: RoomServiceOrder) => {
     setState((prev) => ({ ...prev, roomService: [order, ...prev.roomService] }));
   }, []);
@@ -838,8 +823,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         const total = priceFor(category, dayType, duration);
         const checkInAt = new Date();
         const until = new Date(checkInAt.getTime() + duration * 3600000).toISOString();
+        // Las cortesías de apertura se descargan solas del stock de recepción.
+        const courtesyMovements: InventoryMovement[] = OPENING_COURTESIES.map((c, i) => ({
+          id: `${makeId("m")}-c${i}`,
+          productId: c.productId,
+          type: "ajuste",
+          quantity: -c.quantity,
+          at: checkInAt.toISOString(),
+          refId: `cortesia-apertura-${roomId}`,
+          user: `Cortesía de apertura · Hab. ${room.number}`,
+        }));
+        const courtesyById = new Map(OPENING_COURTESIES.map((c) => [c.productId, c.quantity]));
         return {
           ...prev,
+          products: prev.products.map((p) => {
+            const qty = courtesyById.get(p.id);
+            return qty ? { ...p, stock: Math.max(0, p.stock - qty) } : p;
+          }),
+          movements: [...courtesyMovements, ...prev.movements],
           rooms: prev.rooms.map((r) =>
             r.id === roomId
               ? {
@@ -859,10 +860,54 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           ),
           audit: [
             auditEntry(
+              "crear",
+              "Registró cortesías de apertura",
+              "Cortesías",
+              `Habitación ${room.number} · ${OPENING_COURTESIES.map((c) => `${c.quantity}× ${c.label}`).join(" · ")}`,
+              actor,
+            ),
+            auditEntry(
               "estado",
               "Hizo un check-in",
               "Habitaciones",
               `Habitación ${room.number} · ${duration} h`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
+  const logCourtesy = useCallback(
+    (roomId: string, productId: string, quantity: number, actor?: Actor) => {
+      setState((prev) => {
+        const room = prev.rooms.find((r) => r.id === roomId);
+        const product = prev.products.find((p) => p.id === productId);
+        if (!room || !product || quantity <= 0) return prev;
+        const movement: InventoryMovement = {
+          id: makeId("m"),
+          productId,
+          type: "ajuste",
+          quantity: -quantity,
+          at: new Date().toISOString(),
+          refId: `cortesia-${roomId}`,
+          user: `Cortesía · Hab. ${room.number}`,
+        };
+        return {
+          ...prev,
+          products: prev.products.map((p) =>
+            p.id === productId ? { ...p, stock: Math.max(0, p.stock - quantity) } : p,
+          ),
+          movements: [movement, ...prev.movements],
+          audit: [
+            auditEntry(
+              "crear",
+              "Registró una cortesía",
+              "Cortesías",
+              `Habitación ${room.number} · ${quantity}× ${product.name}`,
               actor,
             ),
             ...prev.audit,
@@ -1772,14 +1817,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     advanceLaundryLoad,
     takeLaundryLoad,
     addLinenIncident,
-    addReceivable,
-    markReceivablePaid,
     addRoomServiceOrder,
     deliverRoomServiceOrder,
     cancelRoomServiceOrder,
     checkIn,
     checkOut,
     moveRoom,
+    logCourtesy,
     extendStay,
     addTransaction,
     addExpense,

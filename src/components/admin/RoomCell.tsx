@@ -1,18 +1,31 @@
 import { getCategory } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
-import type { Room } from "@/types";
+import type { CategoryId, Room } from "@/types";
 import { ROOM_STATUS } from "./roomStatus";
 
-/** Tiempo restante del bloque, calculado en el cliente contra la hora actual. */
-function remaining(room: Room, now: number | null): string | null {
+/** Minutos restantes del bloque (solo habitaciones ocupadas). */
+function minutesLeft(room: Room, now: number | null): number | null {
   if (room.status !== "occupied" || !room.occupiedUntil || now == null) return null;
-  const ms = new Date(room.occupiedUntil).getTime() - now;
-  if (ms <= 0) return "Finalizando";
-  const totalMin = Math.round(ms / 60000);
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
+  return Math.round((new Date(room.occupiedUntil).getTime() - now) / 60000);
+}
+
+function leftLabel(minutes: number): string {
+  if (minutes <= 0) return "Finalizando";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
+
+/** Aviso para contactar al huésped antes del término de su bloque. */
+const ENDING_SOON_MIN = 30;
+
+// Distintivo de categoría: el recepcionista no memoriza qué pieza es qué.
+const CATEGORY_BADGE: Record<CategoryId, string> = {
+  standard: "border-line-strong bg-surface/70 text-muted",
+  "vip-jacuzzi": "border-gold/60 bg-gold/10 text-gold",
+  "jacuzzi-premium": "border-wine/60 bg-wine/10 text-wine-soft",
+  black: "border-gold/70 bg-[#181410] text-gold",
+};
 
 interface RoomCellProps {
   room: Room;
@@ -23,23 +36,57 @@ interface RoomCellProps {
 export function RoomCell({ room, now, onSelect }: RoomCellProps) {
   const status = ROOM_STATUS[room.status];
   const category = getCategory(room.categoryId);
-  const left = remaining(room, now);
+  const minutes = minutesLeft(room, now);
+  const endingSoon = minutes != null && minutes <= ENDING_SOON_MIN;
 
   return (
     <button
       type="button"
       onClick={() => onSelect(room)}
-      className="group flex flex-col gap-3 border border-line bg-surface/40 p-4 text-left transition-colors hover:border-line-strong"
+      className={cn(
+        "group flex flex-col gap-2.5 border p-4 text-left transition-all hover:brightness-110",
+        status.card,
+        endingSoon && "border-transparent ring-2 ring-gold",
+      )}
     >
-      <div className="flex items-center justify-between">
-        <span className="tnum font-display text-xl text-cream">{room.number}</span>
-        <span className={cn("size-2 rounded-full", status.dot)} aria-hidden />
+      <div className="flex items-start justify-between gap-2">
+        <span className={cn("tnum font-display text-2xl leading-none", status.fg)}>
+          {room.number}
+        </span>
+        <span
+          className={cn(
+            "size-2.5 shrink-0 rounded-full",
+            status.dot,
+            endingSoon && "animate-pulse bg-gold",
+          )}
+          aria-hidden
+        />
       </div>
-      <div>
-        <p className={cn("text-xs", status.text)}>{status.label}</p>
-        <p className="kicker mt-1 text-dim">{category.shortName}</p>
-      </div>
-      <p className="tnum min-h-4 text-xs text-muted">{left ? `${left} restante` : " "}</p>
+
+      <p className={cn("text-sm font-medium", status.fg)}>{status.label}</p>
+
+      <span
+        className={cn(
+          "self-start rounded-xs border px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-[0.1em]",
+          CATEGORY_BADGE[room.categoryId],
+        )}
+      >
+        {category.shortName}
+      </span>
+
+      <p className="tnum min-h-4 text-xs">
+        {minutes != null ? (
+          endingSoon ? (
+            <span className="font-semibold text-gold">
+              Por terminar · {leftLabel(minutes)}
+            </span>
+          ) : (
+            <span className={cn("opacity-80", status.fg)}>{leftLabel(minutes)} restante</span>
+          )
+        ) : (
+          " "
+        )}
+      </p>
     </button>
   );
 }

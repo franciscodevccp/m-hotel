@@ -1,15 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
-import { Modal } from "@/components/ui/Modal";
+import { ImagePlaceholder } from "@/components/ui/ImagePlaceholder";
 import { Select } from "@/components/ui/Select";
 import { formatCLP, formatTime } from "@/lib/format";
 import { makeId } from "@/lib/id";
 import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import type { RoomServiceItem, RoomServiceOrder, RoomServiceStatus } from "@/types";
+import type {
+  Product,
+  Room,
+  RoomServiceItem,
+  RoomServiceOrder,
+  RoomServiceStatus,
+} from "@/types";
 
 const STATUS_LABEL: Record<RoomServiceStatus, string> = {
   preparando: "En preparación",
@@ -29,8 +35,33 @@ const STATUS_ORDER: Record<RoomServiceStatus, number> = {
   cancelado: 2,
 };
 
-const fieldClass =
-  "mt-2 min-h-[44px] w-full rounded-sm border border-line bg-surface px-3 py-2.5 text-sm text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none";
+// Categorías del punto de venta táctil (pedido del cliente): cinco accesos
+// grandes que agrupan los grupos reales del catálogo.
+const POS_FILTERS: { id: string; label: string; groups?: string[]; category?: string }[] = [
+  {
+    id: "bebidas",
+    label: "Bebidas",
+    groups: ["Bebidas", "Cervezas", "Cócteles", "Destilados", "Espumantes", "Vinos"],
+  },
+  {
+    id: "comidas",
+    label: "Comidas",
+    groups: [
+      "Sugerencias del M",
+      "Platos calientes",
+      "Para compartir",
+      "Sándwich y pizzas",
+      "Acompañamientos",
+    ],
+  },
+  {
+    id: "snacks",
+    label: "Snacks",
+    groups: ["Algo dulce", "Extras", "Spa", "Cigarros", "Celebraciones"],
+  },
+  { id: "sexshop", label: "Sexshop", category: "sexshop" },
+  { id: "cortesias", label: "Cortesías", groups: ["Cortesías"] },
+];
 
 export default function RoomServicePage() {
   const {
@@ -45,17 +76,9 @@ export default function RoomServicePage() {
   const userLabel = user ? `${user.roleLabel} · ${user.name}` : "Recepción";
   const actor = user ? { name: user.name, role: user.role } : undefined;
 
-  const sellable = products.filter((p) => p.active && p.channels.includes("room_service"));
   const nameById = new Map(products.map((p) => [p.id, p.name]));
-  const priceById = new Map(products.map((p) => [p.id, p.price]));
 
-  const [open, setOpen] = useState(false);
-  const [roomId, setRoomId] = useState(rooms[0]?.id ?? "");
-  const [items, setItems] = useState<RoomServiceItem[]>([]);
-  const [notes, setNotes] = useState("");
-
-  const total = items.reduce((s, it) => s + (priceById.get(it.productId) ?? 0) * it.quantity, 0);
-  const valid = roomId && items.length > 0;
+  const [posOpen, setPosOpen] = useState(false);
 
   const list = [...roomService].sort((a, b) => {
     if (a.status !== b.status) return STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
@@ -63,37 +86,14 @@ export default function RoomServicePage() {
   });
   const preparing = roomService.filter((o) => o.status === "preparando").length;
 
-  function resetForm() {
-    setRoomId(rooms[0]?.id ?? "");
-    setItems([]);
-    setNotes("");
-  }
-
-  function submit() {
-    if (!valid) return;
-    const order: RoomServiceOrder = {
-      id: makeId("rs"),
-      roomId,
-      items,
-      total,
-      notes: notes.trim() || undefined,
-      status: "preparando",
-      createdAt: new Date().toISOString(),
-      user: userLabel,
-    };
-    addRoomServiceOrder(order);
-    resetForm();
-    setOpen(false);
-  }
-
   function roomNumber(id: string) {
     return rooms.find((r) => r.id === id)?.number ?? id;
   }
 
   return (
     <div className="mx-auto max-w-5xl">
-      <div className="mb-8 flex items-start justify-between gap-4">
-        <div>
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
           <span className="kicker text-gold">Operación</span>
           <h1 className="mt-3 font-display text-3xl text-cream sm:text-4xl">Room service</h1>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
@@ -101,13 +101,7 @@ export default function RoomServicePage() {
             al corte del turno.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            resetForm();
-            setOpen(true);
-          }}
-          className="shrink-0"
-        >
+        <Button onClick={() => setPosOpen(true)} className="shrink-0">
           Nuevo pedido
         </Button>
       </div>
@@ -184,104 +178,304 @@ export default function RoomServicePage() {
         </div>
       )}
 
-      {open && (
-        <Modal title="Nuevo pedido" subtitle="Room service" onClose={() => setOpen(false)}>
-          <div className="space-y-4">
-            <div>
-              <label className="kicker text-dim" htmlFor="rs-room">
-                Habitación
-              </label>
-              <Select
-                id="rs-room"
-                value={roomId}
-                onValueChange={setRoomId}
-                options={rooms.map((r) => ({ value: r.id, label: `Habitación ${r.number}` }))}
-              />
-            </div>
+      {posOpen && (
+        <PosSheet
+          rooms={rooms}
+          products={products}
+          onClose={() => setPosOpen(false)}
+          onSubmit={(roomId, items, notes, total) => {
+            const order: RoomServiceOrder = {
+              id: makeId("rs"),
+              roomId,
+              items,
+              total,
+              notes: notes.trim() || undefined,
+              status: "preparando",
+              createdAt: new Date().toISOString(),
+              user: userLabel,
+            };
+            addRoomServiceOrder(order);
+            setPosOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
 
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="kicker text-dim">Productos</span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setItems([...items, { productId: sellable[0]?.id ?? "", quantity: 1 }])
-                  }
-                  className="text-xs uppercase tracking-[0.14em] text-gold transition-colors hover:text-gold-soft"
-                >
-                  Agregar
-                </button>
-              </div>
-              <div className="mt-2 space-y-2">
-                {items.length === 0 && (
-                  <p className="text-xs text-dim">Agrega al menos un producto al pedido.</p>
+/* ----------------------------------------------------------------------------
+   Punto de venta táctil: productos en tarjetas con imagen, filtros por
+   categoría y carga con un toque. Pensado para pantalla touch grande.
+---------------------------------------------------------------------------- */
+
+function PosSheet({
+  rooms,
+  products,
+  onClose,
+  onSubmit,
+}: {
+  rooms: Room[];
+  products: Product[];
+  onClose: () => void;
+  onSubmit: (roomId: string, items: RoomServiceItem[], notes: string, total: number) => void;
+}) {
+  const [roomId, setRoomId] = useState(rooms.find((r) => r.status === "occupied")?.id ?? rooms[0]?.id ?? "");
+  const [filter, setFilter] = useState("bebidas");
+  const [query, setQuery] = useState("");
+  const [qty, setQty] = useState<Record<string, number>>({});
+  const [notes, setNotes] = useState("");
+
+  // Catálogo del punto de venta: carta de room service + sexshop + cortesías.
+  const catalog = useMemo(
+    () =>
+      products.filter(
+        (p) =>
+          p.active &&
+          (p.channels.includes("room_service") ||
+            p.category === "sexshop" ||
+            p.group === "Cortesías"),
+      ),
+    [products],
+  );
+
+  const active = POS_FILTERS.find((f) => f.id === filter) ?? POS_FILTERS[0];
+  const q = query.trim().toLowerCase();
+  const visible = useMemo(
+    () =>
+      catalog
+        .filter((p) =>
+          q
+            ? p.name.toLowerCase().includes(q)
+            : active.category
+              ? p.category === active.category
+              : (active.groups ?? []).includes(p.group ?? ""),
+        )
+        .sort((a, b) => a.name.localeCompare(b.name, "es")),
+    [catalog, active, q],
+  );
+
+  const lines = useMemo(
+    () =>
+      Object.entries(qty)
+        .filter(([, n]) => n > 0)
+        .map(([productId, quantity]) => {
+          const product = products.find((p) => p.id === productId);
+          return { productId, quantity, product };
+        }),
+    [qty, products],
+  );
+  const total = lines.reduce((s, l) => s + (l.product?.price ?? 0) * l.quantity, 0);
+  const count = lines.reduce((s, l) => s + l.quantity, 0);
+  const valid = roomId && lines.length > 0;
+
+  function add(p: Product) {
+    setQty((prev) => {
+      const current = prev[p.id] ?? 0;
+      if (current >= p.stock) return prev; // sin stock no hay carga
+      return { ...prev, [p.id]: current + 1 };
+    });
+  }
+
+  function remove(productId: string) {
+    setQty((prev) => {
+      const current = prev[productId] ?? 0;
+      if (current <= 0) return prev;
+      return { ...prev, [productId]: current - 1 };
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex flex-col bg-bg" role="dialog" aria-modal="true" aria-label="Nuevo pedido">
+      {/* Encabezado del punto de venta */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+        <div>
+          <span className="kicker text-gold">Room service</span>
+          <h2 className="mt-1 font-display text-2xl text-cream">Nuevo pedido</h2>
+        </div>
+        <div className="flex items-center gap-3">
+          <Select
+            value={roomId}
+            onValueChange={setRoomId}
+            ariaLabel="Habitación"
+            className="mt-0 w-48"
+            options={rooms.map((r) => ({
+              value: r.id,
+              label: `Habitación ${r.number}${r.status === "occupied" ? " · ocupada" : ""}`,
+            }))}
+          />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="text-2xl leading-none text-dim transition-colors hover:text-cream"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        {/* Catálogo táctil */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex flex-wrap items-center gap-2 border-b border-line px-5 py-3">
+            {POS_FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => {
+                  setFilter(f.id);
+                  setQuery("");
+                }}
+                className={cn(
+                  "min-h-[44px] border px-5 text-sm font-medium uppercase tracking-[0.08em] transition-colors",
+                  filter === f.id && !q
+                    ? "border-gold bg-gold text-bg"
+                    : "border-line text-muted hover:border-gold/60 hover:text-gold",
                 )}
-                {items.map((item, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Select
-                      value={item.productId}
-                      onValueChange={(v) => {
-                        const next = [...items];
-                        next[i] = { ...next[i], productId: v };
-                        setItems(next);
-                      }}
-                      ariaLabel="Producto"
-                      className="mt-0 flex-1"
-                      options={sellable.map((p) => ({
-                        value: p.id,
-                        label: `${p.name} — ${formatCLP(p.price)}`,
-                      }))}
-                    />
-                    <input
-                      inputMode="numeric"
-                      value={String(item.quantity)}
-                      onChange={(e) => {
-                        const next = [...items];
-                        next[i] = {
-                          ...next[i],
-                          quantity: Math.max(1, Number(e.target.value.replace(/\D/g, "")) || 1),
-                        };
-                        setItems(next);
-                      }}
-                      className="tnum h-11 w-14 rounded-sm border border-line bg-surface text-center text-sm text-cream focus:border-gold/60 focus-visible:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setItems(items.filter((_, j) => j !== i))}
-                      aria-label="Quitar producto"
-                      className="size-11 shrink-0 border border-line text-dim transition-colors hover:border-busy/60 hover:text-busy"
+              >
+                {f.label}
+              </button>
+            ))}
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar producto"
+              className="min-h-[44px] flex-1 rounded-sm border border-line bg-surface px-4 text-sm text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none sm:max-w-xs"
+            />
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            {visible.length === 0 ? (
+              <p className="py-16 text-center text-sm text-dim">
+                Sin productos para esta categoría.
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                {visible.map((p) => {
+                  const n = qty[p.id] ?? 0;
+                  const out = p.stock <= 0;
+                  return (
+                    <div
+                      key={p.id}
+                      className={cn(
+                        "relative flex flex-col border text-left transition-colors",
+                        n > 0 ? "border-gold/70 bg-surface-2" : "border-line bg-surface/40",
+                        out && "opacity-45",
+                      )}
                     >
-                      ×
-                    </button>
-                  </div>
-                ))}
+                      <button
+                        type="button"
+                        onClick={() => add(p)}
+                        disabled={out}
+                        className="flex flex-1 flex-col text-left disabled:pointer-events-none"
+                      >
+                        <ImagePlaceholder
+                          ratio="square"
+                          label="Próximamente"
+                          accent={p.ageRestricted}
+                          className="w-full border-0 border-b border-line"
+                        />
+                        <span className="px-3 pt-2 text-sm leading-snug text-cream">
+                          <span className="line-clamp-2 min-h-[2.4em]">{p.name}</span>
+                        </span>
+                        <span className="tnum px-3 pb-2 pt-1 text-sm text-gold">
+                          {p.price > 0 ? formatCLP(p.price) : "Cortesía"}
+                          {out && <span className="ml-2 text-xs text-busy">Agotado</span>}
+                        </span>
+                      </button>
+
+                      {n > 0 && (
+                        <>
+                          <span className="tnum absolute right-2 top-2 flex min-h-7 min-w-7 items-center justify-center rounded-full bg-gold px-2 text-sm font-semibold text-bg">
+                            {n}
+                          </span>
+                          <div className="flex border-t border-line">
+                            <button
+                              type="button"
+                              onClick={() => remove(p.id)}
+                              aria-label={`Quitar ${p.name}`}
+                              className="min-h-[44px] flex-1 text-lg text-muted transition-colors hover:text-busy"
+                            >
+                              −
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => add(p)}
+                              aria-label={`Agregar ${p.name}`}
+                              className="min-h-[44px] flex-1 border-l border-line text-lg text-muted transition-colors hover:text-gold"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+            )}
+          </div>
+        </div>
 
-            <div>
-              <label className="kicker text-dim" htmlFor="rs-notes">
-                Notas (opcional)
-              </label>
-              <input
-                id="rs-notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Indicaciones del pedido"
-                className={fieldClass}
-              />
+        {/* Pedido en curso */}
+        <aside className="flex max-h-[42vh] flex-col border-t border-line bg-surface/40 lg:max-h-none lg:w-[340px] lg:border-l lg:border-t-0">
+          <p className="kicker border-b border-line px-5 py-3 text-dim">
+            Pedido · Habitación {rooms.find((r) => r.id === roomId)?.number ?? "—"}
+          </p>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+            {lines.length === 0 ? (
+              <p className="py-8 text-sm text-dim">
+                Toca un producto para cargarlo al pedido.
+              </p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {lines.map((l) => (
+                  <li key={l.productId} className="flex items-baseline justify-between gap-3 py-2.5">
+                    <span className="min-w-0 truncate text-sm text-cream">
+                      <span className="tnum text-gold">{l.quantity}×</span> {l.product?.name}
+                    </span>
+                    <span className="tnum shrink-0 text-sm text-muted">
+                      {(l.product?.price ?? 0) > 0
+                        ? formatCLP((l.product?.price ?? 0) * l.quantity)
+                        : "Cortesía"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="space-y-3 border-t border-line px-5 py-4">
+            <input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Notas del pedido (opcional)"
+              className="min-h-[44px] w-full rounded-sm border border-line bg-surface px-3 text-sm text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none"
+            />
+            <div className="flex items-baseline justify-between">
+              <span className="kicker text-dim">
+                Total · {count} ítem{count === 1 ? "" : "s"}
+              </span>
+              <span className="tnum font-display text-2xl text-gold">{formatCLP(total)}</span>
             </div>
-
-            <div className="flex items-baseline justify-between border-t border-line pt-4">
-              <span className="kicker text-dim">Total</span>
-              <span className="tnum font-display text-xl text-gold">{formatCLP(total)}</span>
-            </div>
-
-            <Button className="w-full" onClick={submit} disabled={!valid}>
+            <Button
+              className="w-full"
+              size="lg"
+              disabled={!valid}
+              onClick={() =>
+                onSubmit(
+                  roomId,
+                  lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+                  notes,
+                  total,
+                )
+              }
+            >
               Crear pedido
             </Button>
           </div>
-        </Modal>
-      )}
+        </aside>
+      </div>
     </div>
   );
 }

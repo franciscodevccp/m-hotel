@@ -24,12 +24,12 @@ const WINE = "#7a2233";
 const AXIS = "#a79f97"; // texto de ejes y tooltips legible (token muted)
 const GRID = "rgba(244, 241, 236, 0.08)";
 
-// Colores de estado (mismos tokens que el tablero) para los gráficos.
+// Colores de estado (mismos matices que el tablero) para los gráficos.
 const STATUS_HEX: Record<RoomStatus, string> = {
-  available: "#7c9a6b",
-  occupied: "#b25a4e",
+  available: "#7da465",
+  occupied: "#6c94b8",
   cleaning: "#c9a24a",
-  maintenance: "#8a837d",
+  maintenance: "#9f9786",
 };
 
 const tooltipStyle = {

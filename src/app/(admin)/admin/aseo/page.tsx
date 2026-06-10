@@ -6,6 +6,7 @@ import { Modal } from "@/components/ui/Modal";
 import { SegmentedToggle } from "@/components/ui/SegmentedToggle";
 import { formatTime } from "@/lib/format";
 import { getCategory } from "@/lib/pricing";
+import { RoomQrScanModal } from "@/components/admin/RoomQrScanModal";
 import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -111,17 +112,74 @@ export default function AseoPage() {
 
   const by = user?.name;
   const actor = user ? { name: user.name, role: user.role } : undefined;
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrMsg, setQrMsg] = useState<{ tone: "ok" | "busy"; text: string } | null>(null);
   const pendientes = rooms.filter((r) => r.status === "cleaning" && !r.cleaningStartedAt);
   const proceso = rooms.filter((r) => r.status === "cleaning" && r.cleaningStartedAt);
   const visible = tab === "pendientes" ? pendientes : tab === "proceso" ? proceso : [];
 
+  /** El QR de la pieza reemplaza el talonario: inicia el aseo a nombre de quien escanea. */
+  function handleScannedRoom(roomNumber: number) {
+    const room = rooms.find((r) => r.number === roomNumber);
+    setQrOpen(false);
+    if (!room) {
+      setQrMsg({ tone: "busy", text: `La habitación ${roomNumber} no existe en el recinto.` });
+      return;
+    }
+    if (room.status === "cleaning" && !room.cleaningStartedAt) {
+      startCleaning(room.id, by, actor);
+      setTab("proceso");
+      setQrMsg({
+        tone: "ok",
+        text: `Aseo iniciado en la habitación ${room.number} a nombre de ${by ?? "tu usuario"}. El tiempo está corriendo.`,
+      });
+      return;
+    }
+    if (room.status === "cleaning") {
+      setQrMsg({
+        tone: "busy",
+        text: `La habitación ${room.number} ya tiene el aseo en proceso${room.cleaningAssignee ? ` (${room.cleaningAssignee})` : ""}.`,
+      });
+      return;
+    }
+    setQrMsg({
+      tone: "busy",
+      text:
+        room.status === "occupied"
+          ? `La habitación ${room.number} está ocupada: aún no pasa a limpieza.`
+          : room.status === "maintenance"
+            ? `La habitación ${room.number} está en mantención.`
+            : `La habitación ${room.number} está disponible: no tiene aseo pendiente.`,
+    });
+  }
+
   return (
     <div className="mx-auto max-w-2xl">
-      <div className="mb-6">
-        <span className="kicker text-gold">Aseo</span>
-        <h1 className="mt-3 font-display text-3xl text-cream sm:text-4xl">Mis habitaciones</h1>
-        <p className="mt-2 text-sm text-muted">Marca cuándo empiezas y cuándo queda lista.</p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <span className="kicker text-gold">Aseo</span>
+          <h1 className="mt-3 font-display text-3xl text-cream sm:text-4xl">Mis habitaciones</h1>
+          <p className="mt-2 text-sm text-muted">
+            Escanea el QR de la pieza al entrar: queda a tu nombre y corre el tiempo.
+          </p>
+        </div>
+        <Button size="lg" onClick={() => { setQrMsg(null); setQrOpen(true); }} className="shrink-0">
+          Escanear QR
+        </Button>
       </div>
+
+      {qrMsg && (
+        <div
+          className={cn(
+            "mb-5 border px-4 py-3 text-sm",
+            qrMsg.tone === "ok"
+              ? "border-ok/50 bg-ok/10 text-ok"
+              : "border-busy/50 bg-busy/10 text-busy",
+          )}
+        >
+          {qrMsg.text}
+        </div>
+      )}
 
       <div className="mb-6 grid grid-cols-3 gap-3">
         <Counter label="Por limpiar" value={pendientes.length} tone="text-clean" />
@@ -204,6 +262,14 @@ export default function AseoPage() {
               placeholder="Ej: ampolleta quemada, llave del jacuzzi gotea"
               className="min-h-[88px] w-full resize-none rounded-sm border border-line bg-surface px-3 py-2.5 text-sm text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none"
             />
+            <button
+              type="button"
+              disabled
+              className="flex w-full items-baseline justify-between border border-dashed border-line px-4 py-3 text-left opacity-70"
+            >
+              <span className="text-sm text-muted">Adjuntar fotografía del problema</span>
+              <span className="kicker text-dim">Próximamente</span>
+            </button>
             <Button
               size="lg"
               className="w-full"
@@ -216,6 +282,19 @@ export default function AseoPage() {
             </Button>
           </div>
         </Modal>
+      )}
+
+      {qrOpen && (
+        <RoomQrScanModal
+          onRoom={handleScannedRoom}
+          onExample={
+            pendientes[0] ? () => handleScannedRoom(pendientes[0].number) : undefined
+          }
+          exampleLabel={
+            pendientes[0] ? `Usar habitación de ejemplo (${pendientes[0].number})` : undefined
+          }
+          onClose={() => setQrOpen(false)}
+        />
       )}
     </div>
   );

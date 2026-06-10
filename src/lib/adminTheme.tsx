@@ -51,6 +51,18 @@ export function AdminThemeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Las clases del tema van también en <html>: los menús desplegables (Radix)
+  // se montan en portales fuera del envoltorio y deben heredar los tokens.
+  // Al salir del panel, el cleanup las quita y el sitio público queda intacto.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.add("admin-ui");
+    root.classList.toggle("admin-light", theme === "light");
+    return () => {
+      root.classList.remove("admin-ui", "admin-light");
+    };
+  }, [theme]);
+
   return (
     <AdminThemeContext.Provider value={{ theme, toggle }}>
       <div className={cn("admin-ui min-h-dvh", theme === "light" && "admin-light")}>

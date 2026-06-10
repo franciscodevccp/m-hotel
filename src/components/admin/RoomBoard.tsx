@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { IdScanModal } from "@/components/admin/IdScanModal";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
+import { ImagePlaceholder } from "@/components/ui/ImagePlaceholder";
 import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { SegmentedToggle } from "@/components/ui/SegmentedToggle";
@@ -49,10 +50,20 @@ const SCAN_IDENTITIES: { name: string; rut: string }[] = [
   { name: "Javiera Campos", rut: "18.115.062-3" },
 ];
 
+// Cortesías de un toque para la habitación ocupada (sin cobro, con rastro).
+const COURTESY_QUICK: { id: string; label: string }[] = [
+  { id: "p-769284017", label: "Alkas" },
+  { id: "p-7802800535569", label: "Papas Kryzpo" },
+  { id: "p-261220243", label: "Bomba de baño" },
+  { id: "p-760798819006", label: "Vaso de espumante" },
+];
+
 export function RoomBoard() {
-  const { rooms, setRoomStatus, checkIn, checkOut, moveRoom, extendStay } = useAppStore();
+  const { rooms, setRoomStatus, checkIn, checkOut, moveRoom, extendStay, logCourtesy } =
+    useAppStore();
   const { user, readOnly } = useSession();
   const actor = user ? { name: user.name, role: user.role } : undefined;
+  const [courtesyMsg, setCourtesyMsg] = useState<string | null>(null);
   const [now, setNow] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<View>("main");
@@ -96,6 +107,12 @@ export function RoomBoard() {
     setScanOpen(false);
     setPayMethod("cash");
     setMoveTarget("");
+    setCourtesyMsg(null);
+  }
+
+  function quickCourtesy(roomId: string, productId: string, label: string) {
+    logCourtesy(roomId, productId, 1, actor);
+    setCourtesyMsg(`Registrada: 1× ${label}`);
   }
 
   /** Respaldo del lector: rellena con una identidad de ejemplo (demo sin carnet). */
@@ -154,6 +171,14 @@ export function RoomBoard() {
           {/* ---- Vista principal ---- */}
           {view === "main" && (
             <div className="space-y-5">
+              {/* Foto de referencia de la pieza (pendiente de producción) */}
+              <ImagePlaceholder
+                ratio="landscape"
+                label="Fotografía de la habitación · próximamente"
+                accent={current.categoryId === "black"}
+                className="max-h-44 w-full"
+              />
+
               <div className="flex items-baseline justify-between">
                 <span className="text-sm text-muted">Estado</span>
                 <span className={cn("text-sm", ROOM_STATUS[current.status].text)}>
@@ -232,6 +257,26 @@ export function RoomBoard() {
                     >
                       +3 horas
                     </button>
+                  </div>
+
+                  {/* Cortesías de un toque: sin cobro, baja stock con rastro */}
+                  <div className="border-t border-line pt-3">
+                    <p className="kicker text-dim">Cortesías · un toque</p>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {COURTESY_QUICK.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => quickCourtesy(current.id, c.id, c.label)}
+                          className="border border-line px-3 py-2.5 text-sm text-muted transition-colors hover:border-gold/70 hover:text-gold"
+                        >
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className={cn("mt-2 min-h-4 text-xs", courtesyMsg ? "text-ok" : "text-dim")}>
+                      {courtesyMsg ?? "Queda registrada al toque, sin cobro."}
+                    </p>
                   </div>
                 </div>
               )}
@@ -334,6 +379,10 @@ export function RoomBoard() {
                 <p className="mt-2 text-xs leading-relaxed text-dim">
                   El escáner lee el código de la cédula y completa nombre y RUT en un paso. No
                   se almacenan imágenes del documento.
+                </p>
+                <p className="mt-2 text-xs leading-relaxed text-dim">
+                  Al confirmar se registran solas las cortesías de apertura: 2× Alkas, 1× Papas
+                  Kryzpo y 1× Bomba de baño.
                 </p>
               </div>
               <div className="flex gap-3">
