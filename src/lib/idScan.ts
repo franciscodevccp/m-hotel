@@ -19,13 +19,16 @@ function capitalize(word: string): string {
 export function parseCedula(raw: string): ScannedId {
   const result: ScannedId = {};
 
-  // RUN explícito (URL del Registro Civil) o suelto en el contenido.
+  // RUN explícito (URL del Registro Civil), con puntos, o suelto en el contenido.
   const runMatch =
-    raw.match(/RUN=(\d{7,8}-?[\dkK])/i) ?? raw.match(/\b(\d{7,8}-[\dkK])\b/);
+    raw.match(/RUN=(\d{7,9}-?[\dkK])/i) ??
+    raw.match(/\b(\d{1,2}\.\d{3}\.\d{3}-[\dkK])\b/) ??
+    raw.match(/\b(\d{7,8}-[\dkK])\b/);
   if (runMatch) {
-    const run = runMatch[1].includes("-")
-      ? runMatch[1]
-      : `${runMatch[1].slice(0, -1)}-${runMatch[1].slice(-1)}`;
+    const clean = runMatch[1].replace(/\./g, "");
+    const run = clean.includes("-")
+      ? clean
+      : `${clean.slice(0, -1)}-${clean.slice(-1)}`;
     result.rut = formatRut(run);
   }
 
