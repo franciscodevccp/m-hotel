@@ -19,6 +19,10 @@ interface NavGroup {
 
 const BOTH: Role[] = ["recepcion", "admin"];
 const ADMIN: Role[] = ["admin"];
+// Encargado: como admin pero acotado — operación básica e inventario, sin caja,
+// precios, reportes ni configuración.
+const STAFF: Role[] = ["recepcion", "admin", "encargado"];
+const STOCK: Role[] = ["encargado", "admin"];
 
 // Área Motel: operación del recinto. Recepción ve un subconjunto (sin precios,
 // reportes ni configuración).
@@ -26,21 +30,23 @@ const MOTEL_GROUPS: NavGroup[] = [
   {
     title: "Operación",
     links: [
-      { href: "/admin", label: "Dashboard", roles: BOTH },
-      { href: "/admin/habitaciones", label: "Habitaciones", roles: BOTH },
-      { href: "/admin/reservas", label: "Reservas", roles: BOTH },
+      { href: "/admin", label: "Dashboard", roles: STAFF },
+      { href: "/admin/habitaciones", label: "Habitaciones", roles: STAFF },
+      { href: "/admin/reservas", label: "Reservas", roles: STAFF },
       { href: "/admin/caja", label: "Caja y turnos", roles: BOTH },
-      { href: "/admin/room-service", label: "Room service", roles: BOTH },
-      { href: "/admin/limpieza", label: "Limpieza", roles: BOTH },
-      { href: "/admin/lavanderia", label: "Lavandería", roles: BOTH },
-      { href: "/admin/anomalias", label: "Anomalías", roles: BOTH },
+      { href: "/admin/room-service", label: "Room service", roles: STAFF },
+      { href: "/admin/limpieza", label: "Limpieza", roles: STAFF },
+      { href: "/admin/lavanderia", label: "Lavandería", roles: STAFF },
+      { href: "/admin/blancos", label: "Blancos", roles: STAFF },
+      { href: "/admin/anomalias", label: "Anomalías", roles: STAFF },
       { href: "/admin/cuentas", label: "Cuentas por cobrar", roles: BOTH },
     ],
   },
   {
     title: "Inventario",
     links: [
-      { href: "/admin/inventario", label: "Productos y stock", roles: BOTH },
+      { href: "/admin/compras", label: "Ingreso de stock", roles: STOCK },
+      { href: "/admin/inventario", label: "Productos y stock", roles: STAFF },
       { href: "/admin/paquetes", label: "Paquetes", roles: ADMIN },
     ],
   },
@@ -57,7 +63,10 @@ const MOTEL_GROUPS: NavGroup[] = [
   },
   {
     title: "Configuración",
-    links: [{ href: "/admin/configuracion", label: "Configuración", roles: ADMIN }],
+    links: [
+      { href: "/admin/configuracion", label: "Configuración", roles: ADMIN },
+      { href: "/admin/auditoria", label: "Auditoría", roles: ADMIN },
+    ],
   },
 ];
 
@@ -93,6 +102,7 @@ const ASEO_GROUPS: NavGroup[] = [
     links: [
       { href: "/admin/aseo", label: "Mis habitaciones", roles: ["aseo"] },
       { href: "/admin/lavanderia", label: "Lavandería", roles: ["aseo"] },
+      { href: "/admin/blancos", label: "Blancos", roles: ["aseo"] },
     ],
   },
 ];

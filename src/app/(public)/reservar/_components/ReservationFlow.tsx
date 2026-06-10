@@ -26,7 +26,6 @@ import { SummaryPanel } from "./SummaryPanel";
 const STEP_TITLES = [
   "Elige la fecha",
   "Elige tu categoría",
-  "Disponibilidad",
   "Horario",
   "Tus datos",
   "Resumen",
@@ -91,7 +90,6 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
   const [step, setStep] = useState(0);
   const [selectedDate, setSelectedDate] = useState("");
   const [categoryId, setCategoryId] = useState<CategoryId | null>(initialCategoryId);
-  const [selectedRoomId, setSelectedRoomId] = useState("");
   const [duration, setDuration] = useState<Duration | null>(null);
   const [arrival, setArrival] = useState("");
   const [guestName, setGuestName] = useState("");
@@ -108,25 +106,25 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
   const endTime = arrivalDate && duration ? addHours(arrivalDate, duration) : null;
   const arrivalLabel = arrival ? hhmmTo12h(arrival) : undefined;
 
-  const categoryRooms = categoryId ? rooms.filter((r) => r.categoryId === categoryId) : [];
-  const availableRooms = categoryRooms.filter((r) => r.status === "available");
-  const roomLabel = selectedRoomId ? `Habitación ${selectedRoomId}` : undefined;
+  // Disponibilidad por categoría: cuántas piezas libres hay ahora en cada una.
+  // El huésped no elige pieza; recepción la asigna al confirmar.
+  const availableByCategory = (id: CategoryId) =>
+    rooms.filter((r) => r.categoryId === id && r.status === "available").length;
+  const categoryAvailable = categoryId ? availableByCategory(categoryId) : 0;
 
   const canContinue =
     step === 0
       ? Boolean(selectedDate)
       : step === 1
-        ? Boolean(categoryId)
+        ? Boolean(categoryId) && categoryAvailable > 0
         : step === 2
-          ? Boolean(selectedRoomId)
+          ? Boolean(duration) && Boolean(arrival)
           : step === 3
-            ? Boolean(duration) && Boolean(arrival)
-            : step === 4
-              ? guestName.trim().length > 1 &&
-                rutOk(guestRut) &&
-                emailOk(guestEmail) &&
-                guestPhone.trim().length >= 8
-              : true;
+            ? guestName.trim().length > 1 &&
+              rutOk(guestRut) &&
+              emailOk(guestEmail) &&
+              guestPhone.trim().length >= 8
+            : true;
 
   function next() {
     setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1));
@@ -138,17 +136,14 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
 
   function selectCategory(id: CategoryId) {
     setCategoryId(id);
-    setSelectedRoomId(""); // la disponibilidad depende de la categoría
   }
 
   function confirm() {
-    if (!selectedDate || !categoryId || !selectedRoomId || !duration || !arrival || total == null)
-      return;
+    if (!selectedDate || !categoryId || !duration || !arrival || total == null) return;
     const arrivalAt = combine(selectedDate, arrival);
     const reservation: Reservation = {
       id: makeId("r"),
       categoryId,
-      roomId: selectedRoomId,
       dayType,
       duration,
       guestName: guestName.trim(),
@@ -206,13 +201,16 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
             <div className="space-y-3">
               {categories.map((c) => {
                 const selected = c.id === categoryId;
+                const avail = availableByCategory(c.id);
+                const soldOut = avail === 0;
                 return (
                   <button
                     key={c.id}
                     type="button"
+                    disabled={soldOut}
                     onClick={() => selectCategory(c.id)}
                     className={cn(
-                      "flex w-full items-center justify-between gap-4 border p-5 text-left transition-colors",
+                      "flex w-full items-center justify-between gap-4 border p-5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                       selected ? "border-gold/70 bg-surface-2" : "border-line hover:border-line-strong",
                     )}
                   >
@@ -222,6 +220,11 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
                         <Badge tone={c.id === "black" ? "black" : "default"}>{c.area} m²</Badge>
                       </div>
                       <p className="mt-1 text-sm text-muted">{c.tagline}</p>
+                      <p className={cn("mt-2 text-xs", soldOut ? "text-busy" : "text-ok")}>
+                        {soldOut
+                          ? "Sin disponibilidad"
+                          : `${avail} ${avail === 1 ? "pieza disponible" : "piezas disponibles"}`}
+                      </p>
                     </div>
                     <div className="shrink-0 text-right">
                       <span className="kicker text-dim">Desde</span>
@@ -233,44 +236,8 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
             </div>
           )}
 
-          {/* Paso 2 — Disponibilidad de habitaciones */}
+          {/* Paso 2 — Horario (día derivado de la fecha) */}
           {step === 2 && (
-            <div className="space-y-5">
-              <p className="text-sm leading-relaxed text-muted">
-                {availableRooms.length > 0
-                  ? `${availableRooms.length} de ${categoryRooms.length} habitaciones disponibles en esta categoría. Elige una.`
-                  : "Sin disponibilidad ahora en esta categoría. Escríbenos por WhatsApp y te avisamos apenas se libere una."}
-              </p>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {categoryRooms.map((room) => {
-                  const available = room.status === "available";
-                  const selected = room.id === selectedRoomId;
-                  return (
-                    <button
-                      key={room.id}
-                      type="button"
-                      disabled={!available}
-                      onClick={() => setSelectedRoomId(room.id)}
-                      className={cn(
-                        "flex flex-col items-start gap-1 border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                        selected
-                          ? "border-gold/70 bg-surface-2"
-                          : "border-line hover:border-line-strong",
-                      )}
-                    >
-                      <span className="tnum font-display text-xl text-cream">{room.number}</span>
-                      <span className={cn("text-xs", available ? "text-ok" : "text-dim")}>
-                        {available ? "Disponible" : "No disponible"}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Paso 3 — Horario (día derivado de la fecha) */}
-          {step === 3 && (
             <div className="space-y-8">
               <div className="border border-line bg-surface/40 px-5 py-4">
                 <p className="kicker text-dim">Día</p>
@@ -333,8 +300,8 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
             </div>
           )}
 
-          {/* Paso 4 — Datos */}
-          {step === 4 && (
+          {/* Paso 3 — Datos */}
+          {step === 3 && (
             <div className="max-w-md space-y-5">
               <div>
                 <label className="kicker text-dim" htmlFor="nombre">
@@ -399,8 +366,8 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
             </div>
           )}
 
-          {/* Paso 5 — Resumen */}
-          {step === 5 && (
+          {/* Paso 4 — Resumen */}
+          {step === 4 && (
             <div className="space-y-6">
               <p className="text-sm leading-relaxed text-muted">
                 Revisa y confirma. Te enviaremos el detalle por WhatsApp.
@@ -408,7 +375,6 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
               <SummaryPanel
                 category={category}
                 dateLabel={dateLabel}
-                roomLabel={roomLabel}
                 dayType={dayType}
                 duration={duration}
                 arrivalLabel={arrivalLabel}
@@ -460,7 +426,6 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
             <SummaryPanel
               category={category}
               dateLabel={dateLabel}
-              roomLabel={roomLabel}
               dayType={dayType}
               duration={duration}
               arrivalLabel={arrivalLabel}

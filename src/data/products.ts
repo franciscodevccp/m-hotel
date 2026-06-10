@@ -7,6 +7,18 @@ import type { InventoryMovement, Product } from "@/types";
 // IDs y SKU se autogeneran; el stock es variado pero determinístico (igual en
 // servidor y cliente, sin Math.random) para no romper la hidratación.
 
+/** Categorías de producto (amigables) para el ingreso de stock. Extensible. */
+export const PRODUCT_CATEGORIES = [
+  "Alimentación",
+  "Bebestible",
+  "Coctelería",
+  "Snack",
+  "Amenidad",
+  "Aseo",
+  "Sexshop",
+  "Otro",
+];
+
 function slug(name: string): string {
   return name
     .toLowerCase()

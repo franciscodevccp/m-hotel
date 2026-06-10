@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { StockBadge, stockLevel } from "@/components/admin/StockBadge";
+import { StockReportButton } from "@/components/admin/StockReportButton";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { MoneyInput } from "@/components/ui/MoneyInput";
@@ -134,7 +135,14 @@ export default function InventarioPage() {
               : "Carta de room service del motel. El sexshop se gestiona en la tienda online."}
           </p>
         </div>
-        <div className="flex shrink-0 gap-3">
+        <div className="flex shrink-0 flex-wrap justify-end gap-3">
+          <StockReportButton
+            products={familyProducts}
+            groups={groupOptions}
+            areaLabel={
+              area === "tienda" ? "Tienda online · Sexshop" : "Motel · Carta / room service"
+            }
+          />
           <Button variant="secondary" onClick={() => setShowMovements(true)}>
             Movimientos
           </Button>

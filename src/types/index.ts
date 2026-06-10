@@ -160,6 +160,45 @@ export interface Package {
 
 export type MovementType = "ingreso" | "venta_presencial" | "venta_online" | "ajuste";
 
+/** Ítem de una lista de compra (ingreso de stock). */
+export interface PurchaseItem {
+  productId: string;
+  quantity: number;
+  unitCost: number; // costo unitario de compra en CLP
+}
+
+/** Ingreso de stock: lista de compra a un proveedor. */
+export interface Purchase {
+  id: string;
+  provider: string;
+  items: PurchaseItem[];
+  total: number; // monto total de la compra
+  at: string; // ISO
+  user?: string;
+}
+
+/** Proveedor del recinto (para el ingreso de stock). */
+export interface Provider {
+  id: string;
+  name: string;
+  rut: string;
+}
+
+/** Tipo de movimiento para la auditoría. */
+export type AuditType = "crear" | "editar" | "estado" | "eliminar" | "acceso";
+
+/** Entrada del registro de auditoría: qué hizo un usuario, cuándo y quién. */
+export interface AuditEntry {
+  id: string;
+  type: AuditType;
+  action: string; // etiqueta legible
+  target?: string; // detalle del objeto afectado
+  module: string; // sección del panel
+  at: string; // ISO
+  userName: string;
+  userRole: Role;
+}
+
 export interface InventoryMovement {
   id: string;
   productId: string;
@@ -206,18 +245,45 @@ export interface Promotion {
   active: boolean;
 }
 
-export type LaundryStatus = "enviado" | "en_proceso" | "recibido";
+/** Etapa de una carga de lavado in-house. */
+export type LaundryStage = "recolectado" | "lavando" | "secando" | "doblando" | "listo";
 
-/** Envío de ropa a un proveedor de lavandería. */
-export interface LaundryOrder {
+/** Carga de lavado propia (lavadoras y secadoras del recinto). */
+export interface LaundryLoad {
   id: string;
-  provider: string;
   sheets: number; // sábanas
   towels: number; // toallas
-  sentAt: string; // ISO
-  status: LaundryStatus;
-  receivedAt?: string; // ISO, cuando se recibe de vuelta
-  takenBy?: string; // aseo que tomó el envío (orden de llegada)
+  robes: number; // batas
+  stage: LaundryStage;
+  machine?: string; // máquina asignada en uso (lavadora/secadora)
+  by?: string; // quién la lleva
+  startedAt?: string; // ISO, inicio de la etapa actual (cronómetro)
+  createdAt: string; // ISO, cuando se recolectó
+}
+
+/** Tipo de blanco (ropa blanca del recinto). */
+export type LinenType = "sabana" | "toalla" | "bata";
+
+/** Stock base de un tipo de blanco. */
+export interface LinenStock {
+  type: LinenType;
+  total: number; // total que posee el recinto
+}
+
+/** Motivo de un percance de blancos. */
+export type LinenIncidentKind = "mancha" | "rotura" | "perdida" | "quemadura" | "desgaste";
+
+/** Percance de un blanco (mancha, rotura, pérdida, etc.). */
+export interface LinenIncident {
+  id: string;
+  type: LinenType;
+  kind: LinenIncidentKind;
+  quantity: number;
+  retired: boolean; // dado de baja (sale de circulación)
+  roomId?: string;
+  note?: string;
+  by?: string;
+  at: string; // ISO
 }
 
 export type ReceivableStatus = "pendiente" | "pagada";
@@ -283,7 +349,7 @@ export type ShopOrderStatus =
   | "cancelado";
 
 /** Forma de entrega del pedido. */
-export type ShopFulfillment = "despacho" | "retiro";
+export type ShopFulfillment = "despacho" | "retiro" | "habitacion";
 
 /** Medio de pago del pedido online. */
 export type ShopPaymentMethod = "webpay" | "transferencia" | "efectivo";
@@ -351,7 +417,7 @@ export interface ShopSettings {
 }
 
 /** Rol de acceso al panel admin (demo). */
-export type Role = "recepcion" | "admin" | "aseo";
+export type Role = "recepcion" | "admin" | "aseo" | "encargado";
 
 /** Área de trabajo del administrador: operación del motel o la tienda online. */
 export type AdminArea = "motel" | "tienda";

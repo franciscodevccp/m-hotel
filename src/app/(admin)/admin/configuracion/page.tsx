@@ -17,6 +17,7 @@ const ROLE_LABEL: Record<Role, string> = {
   recepcion: "Recepción",
   admin: "Administración",
   aseo: "Aseo",
+  encargado: "Encargado",
 };
 
 const fieldClass =
@@ -379,6 +380,7 @@ export default function ConfiguracionPage() {
                   { value: "recepcion", label: "Recepción" },
                   { value: "admin", label: "Administración" },
                   { value: "aseo", label: "Aseo" },
+                  { value: "encargado", label: "Encargado" },
                 ]}
               />
             </div>

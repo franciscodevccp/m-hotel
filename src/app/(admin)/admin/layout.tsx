@@ -20,7 +20,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       return;
     }
     const aseoAllowed =
-      pathname.startsWith("/admin/aseo") || pathname.startsWith("/admin/lavanderia");
+      pathname.startsWith("/admin/aseo") ||
+      pathname.startsWith("/admin/lavanderia") ||
+      pathname.startsWith("/admin/blancos");
     if (user.role === "aseo" && !aseoAllowed) {
       router.replace("/admin/aseo");
     }

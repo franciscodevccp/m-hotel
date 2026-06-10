@@ -16,6 +16,7 @@ export const SEED_USERS: StaffUser[] = [
   { id: "u-1", name: "Ivon", role: "admin", active: true },
   { id: "u-2", name: "Recepción turno noche", role: "recepcion", active: true },
   { id: "u-3", name: "Recepción turno día", role: "recepcion", active: true },
+  { id: "u-4", name: "Encargado de inventario", role: "encargado", active: true },
 ];
 
 export const SEED_BLACKLIST: BlacklistEntry[] = [

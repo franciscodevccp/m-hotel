@@ -27,11 +27,17 @@ const PROFILES: Record<Role, { user: string; password: string; desc: string }> =
     password: "demo1234",
     desc: "Limpieza: solo tus habitaciones por limpiar.",
   },
+  encargado: {
+    user: "encargado",
+    password: "demo1234",
+    desc: "Inventario: ingreso de stock con proveedor, lista de compra y monto total.",
+  },
 };
 
 const ROLE_SEGMENTS: { value: Role; label: string }[] = [
   { value: "recepcion", label: "Recepción" },
   { value: "admin", label: "Admin" },
+  { value: "encargado", label: "Encargado" },
   { value: "aseo", label: "Aseo" },
 ];
 
@@ -39,6 +45,14 @@ const HOME: Record<Role, string> = {
   admin: "/admin",
   recepcion: "/admin/habitaciones",
   aseo: "/admin/aseo",
+  encargado: "/admin/compras",
+};
+
+const ENTRY_LABEL: Record<Role, string> = {
+  admin: "administración",
+  recepcion: "recepción",
+  aseo: "aseo",
+  encargado: "encargado",
 };
 
 export default function LoginPage() {
@@ -103,7 +117,7 @@ export default function LoginPage() {
             className={inputClass}
           />
           <Button type="submit" className="w-full">
-            Entrar como {role === "admin" ? "administración" : role === "aseo" ? "aseo" : "recepción"}
+            Entrar como {ENTRY_LABEL[role]}
           </Button>
         </form>
       </div>

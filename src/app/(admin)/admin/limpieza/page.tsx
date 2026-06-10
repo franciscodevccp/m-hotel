@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { CleaningReportButton, fmtDuration } from "@/components/admin/CleaningReportButton";
+import { Select } from "@/components/ui/Select";
+import { formatDate, formatTime } from "@/lib/format";
 import { getCategory } from "@/lib/pricing";
+import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -16,8 +20,11 @@ function elapsed(fromISO: string | undefined, now: number | null): string | null
 }
 
 export default function LimpiezaPage() {
-  const { rooms, setRoomStatus } = useAppStore();
+  const { rooms, cleaningLog, setRoomStatus } = useAppStore();
+  const { user } = useSession();
+  const isAdmin = user?.role === "admin";
   const [now, setNow] = useState<number | null>(null);
+  const [empFilter, setEmpFilter] = useState("all");
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- siembra la hora actual al montar (cronómetros en vivo)
@@ -29,6 +36,23 @@ export default function LimpiezaPage() {
   const pending = rooms.filter((r) => r.status === "cleaning");
   const inProgress = pending.filter((r) => r.cleaningStartedAt).length;
   const available = pending.length - inProgress;
+
+  // Historial (vista de administración): quién hizo cada limpieza y cuánto demoró.
+  const employees = useMemo(
+    () => [...new Set(cleaningLog.map((e) => e.by).filter((b): b is string => !!b))],
+    [cleaningLog],
+  );
+  const history = useMemo(
+    () =>
+      [...cleaningLog]
+        .filter((e) => empFilter === "all" || e.by === empFilter)
+        .sort((a, b) => b.at.localeCompare(a.at)),
+    [cleaningLog, empFilter],
+  );
+  const withMin = history.filter((e) => e.minutes != null);
+  const totalMin = withMin.reduce((s, e) => s + (e.minutes ?? 0), 0);
+  const avgMin = withMin.length > 0 ? Math.round(totalMin / withMin.length) : 0;
+  const roomNumber = (id: string) => rooms.find((r) => r.id === id)?.number ?? id;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -100,6 +124,81 @@ export default function LimpiezaPage() {
           </ul>
         </div>
       )}
+
+      {isAdmin && (
+        <section className="mt-12">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h2 className="font-display text-2xl text-cream">Historial de limpiezas</h2>
+              <p className="mt-1 text-sm text-muted">
+                Quién hizo cada limpieza y cuánto se demoró. Filtra por empleado y descarga el
+                informe.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Select
+                value={empFilter}
+                onValueChange={setEmpFilter}
+                ariaLabel="Empleado"
+                className="mt-0 w-52"
+                options={[
+                  { value: "all", label: "Todos los empleados" },
+                  ...employees.map((e) => ({ value: e, label: e })),
+                ]}
+              />
+              <CleaningReportButton entries={cleaningLog} rooms={rooms} employees={employees} />
+            </div>
+          </div>
+
+          <div className="mb-4 grid grid-cols-3 gap-3">
+            <Stat label="Limpiezas" value={String(history.length)} />
+            <Stat label="Tiempo promedio" value={avgMin > 0 ? fmtDuration(avgMin) : "—"} />
+            <Stat label="Tiempo total" value={fmtDuration(totalMin)} />
+          </div>
+
+          {history.length === 0 ? (
+            <div className="border border-line bg-surface/40 px-6 py-10 text-center">
+              <p className="text-sm text-dim">Sin limpiezas registradas para este filtro.</p>
+            </div>
+          ) : (
+            <div className="overflow-hidden border border-line bg-surface/40">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-line text-dim">
+                    <th className="kicker px-5 py-3 font-normal">Habitación</th>
+                    <th className="kicker px-5 py-3 font-normal">Empleado</th>
+                    <th className="kicker hidden px-5 py-3 font-normal sm:table-cell">Fecha</th>
+                    <th className="kicker px-5 py-3 font-normal">Hora</th>
+                    <th className="kicker px-5 py-3 text-right font-normal">Duración</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((e) => (
+                    <tr key={e.id} className="border-b border-line last:border-b-0">
+                      <td className="px-5 py-3 text-cream">Habitación {roomNumber(e.roomId)}</td>
+                      <td className="px-5 py-3 text-muted">{e.by ?? "—"}</td>
+                      <td className="hidden px-5 py-3 text-muted sm:table-cell">
+                        {formatDate(new Date(e.at))}
+                      </td>
+                      <td className="tnum px-5 py-3 text-muted">{formatTime(new Date(e.at))}</td>
+                      <td className="tnum px-5 py-3 text-right text-gold">{fmtDuration(e.minutes)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border border-line bg-surface/40 p-4">
+      <p className="kicker text-dim">{label}</p>
+      <p className="tnum mt-2 font-display text-2xl text-cream">{value}</p>
     </div>
   );
 }

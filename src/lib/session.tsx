@@ -33,6 +33,12 @@ export const SESSION_USERS: Record<Role, SessionUser> = {
     roleLabel: "Aseo",
     context: "Turno limpieza",
   },
+  encargado: {
+    role: "encargado",
+    name: "Encargado",
+    roleLabel: "Encargado",
+    context: "Inventario y compras",
+  },
 };
 
 interface SessionStore {
@@ -59,7 +65,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const role = JSON.parse(raw) as Role;
-        if (role === "recepcion" || role === "admin" || role === "aseo") {
+        if (role === "recepcion" || role === "admin" || role === "aseo" || role === "encargado") {
           // eslint-disable-next-line react-hooks/set-state-in-effect -- hidratación única desde localStorage en el cliente
           setUser(SESSION_USERS[role]);
         }

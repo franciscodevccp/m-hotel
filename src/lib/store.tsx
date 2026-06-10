@@ -10,11 +10,15 @@ import {
 } from "react";
 import { CATEGORIES } from "@/data/categories";
 import { SEED_ANOMALIES } from "@/data/anomalies";
+import { SEED_AUDIT } from "@/data/audit";
+import { SEED_CLEANING_LOG } from "@/data/cleaning";
 import { SEED_COUPONS } from "@/data/coupons";
-import { SEED_LAUNDRY } from "@/data/laundry";
+import { freeMachineName, SEED_LAUNDRY, seedLaundryTimes } from "@/data/laundry";
+import { LINEN_STOCK, SEED_LINEN_INCIDENTS } from "@/data/linens";
 import { SEED_PACKAGES } from "@/data/packages";
 import { SEED_DISCOUNTS, SEED_PROMOTIONS } from "@/data/pricingRules";
-import { SEED_MOVEMENTS, SEED_PRODUCTS } from "@/data/products";
+import { PRODUCT_CATEGORIES, SEED_MOVEMENTS, SEED_PRODUCTS } from "@/data/products";
+import { PROVIDERS, SEED_PURCHASES } from "@/data/purchases";
 import { SEED_RECEIVABLES } from "@/data/receivables";
 import { SEED_RESERVATIONS } from "@/data/reservations";
 import { SEED_ROOM_SERVICE } from "@/data/roomService";
@@ -28,6 +32,7 @@ import { extraHourFor, priceFor } from "@/lib/pricing";
 import { SHOP_NEXT } from "@/lib/shop";
 import type {
   Anomaly,
+  AuditEntry,
   BlacklistEntry,
   Category,
   CleaningLogEntry,
@@ -37,13 +42,17 @@ import type {
   Duration,
   Expense,
   InventoryMovement,
-  LaundryOrder,
-  LaundryStatus,
+  LaundryLoad,
+  LaundryStage,
+  LinenIncident,
+  LinenStock,
   MaintenanceReport,
   Package,
   PaymentMethod,
   Product,
   Promotion,
+  Provider,
+  Purchase,
   Receivable,
   Reservation,
   Room,
@@ -58,7 +67,7 @@ import type {
   VenueSettings,
 } from "@/types";
 
-const STORAGE_KEY = "m-motel-state-v8";
+const STORAGE_KEY = "m-motel-state-v12";
 
 interface AppState {
   reservations: Reservation[];
@@ -73,7 +82,7 @@ interface AppState {
   discounts: Discount[];
   promotions: Promotion[];
   anomalies: Anomaly[];
-  laundry: LaundryOrder[];
+  laundry: LaundryLoad[];
   receivables: Receivable[];
   roomService: RoomServiceOrder[];
   settings: VenueSettings;
@@ -84,6 +93,12 @@ interface AppState {
   shopOrders: ShopOrder[];
   coupons: Coupon[];
   shopSettings: ShopSettings;
+  purchases: Purchase[];
+  providers: Provider[];
+  productCategories: string[];
+  audit: AuditEntry[];
+  linens: LinenStock[];
+  linenIncidents: LinenIncident[];
 }
 
 interface AppStore extends AppState {
@@ -105,12 +120,14 @@ interface AppStore extends AppState {
   addAnomaly: (anomaly: Anomaly) => void;
   /** Marca una anomalía como resuelta. */
   resolveAnomaly: (id: string) => void;
-  /** Crea un envío a lavandería. */
-  addLaundryOrder: (order: LaundryOrder) => void;
-  /** Avanza el estado de un envío de lavandería (enviado → en proceso → recibido). */
-  advanceLaundry: (id: string) => void;
-  /** El aseo toma un envío de lavandería (orden de llegada). */
-  takeLaundry: (id: string, by?: string) => void;
+  /** Crea una carga de lavado (recolectada). */
+  addLaundryLoad: (load: LaundryLoad) => void;
+  /** Avanza la carga por sus etapas y asigna máquina (lavadora/secadora). */
+  advanceLaundryLoad: (id: string) => void;
+  /** El aseo toma una carga de lavado (orden de llegada). */
+  takeLaundryLoad: (id: string, by?: string) => void;
+  /** Registra un percance de blancos (mancha, rotura, pérdida, etc.). */
+  addLinenIncident: (incident: LinenIncident) => void;
   /** Crea una cuenta por cobrar. */
   addReceivable: (receivable: Receivable) => void;
   /** Marca una cuenta como pagada; el monto entra al corte del turno. */
@@ -174,6 +191,12 @@ interface AppStore extends AppState {
   updateCoupon: (coupon: Coupon) => void;
   /** Actualiza los ajustes de la tienda online. */
   updateShopSettings: (patch: Partial<ShopSettings>) => void;
+  /** Registra un ingreso de stock (lista de compra): sube stock y deja movimientos. */
+  addPurchase: (purchase: Purchase) => void;
+  /** Agrega un proveedor (con RUT) a la lista. */
+  addProvider: (provider: Provider) => void;
+  /** Agrega una categoría de producto a la lista. */
+  addProductCategory: (name: string) => void;
   resetDemo: () => void;
 }
 
@@ -201,10 +224,16 @@ function seedState(): AppState {
     users: SEED_USERS,
     blacklist: SEED_BLACKLIST,
     maintenanceReports: [],
-    cleaningLog: [],
+    cleaningLog: SEED_CLEANING_LOG,
     shopOrders: SEED_SHOP_ORDERS,
     coupons: SEED_COUPONS,
     shopSettings: DEFAULT_SHOP_SETTINGS,
+    purchases: SEED_PURCHASES,
+    providers: PROVIDERS,
+    productCategories: PRODUCT_CATEGORIES,
+    audit: SEED_AUDIT,
+    linens: LINEN_STOCK,
+    linenIncidents: SEED_LINEN_INCIDENTS,
   };
 }
 
@@ -265,9 +294,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           shopOrders: parsed.shopOrders ?? prev.shopOrders,
           coupons: parsed.coupons ?? prev.coupons,
           shopSettings: parsed.shopSettings ?? prev.shopSettings,
+          purchases: parsed.purchases ?? prev.purchases,
+          providers: parsed.providers ?? prev.providers,
+          productCategories: parsed.productCategories ?? prev.productCategories,
+          audit: parsed.audit ?? prev.audit,
+          linens: parsed.linens ?? prev.linens,
+          linenIncidents: parsed.linenIncidents ?? prev.linenIncidents,
         }));
       } else {
-        setState((prev) => ({ ...prev, rooms: seedRoomTimes(prev.rooms) }));
+        setState((prev) => ({
+          ...prev,
+          rooms: seedRoomTimes(prev.rooms),
+          laundry: seedLaundryTimes(prev.laundry),
+        }));
       }
     } catch {
       // Si localStorage no está disponible, seguimos con el estado base.
@@ -416,35 +455,47 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const addLaundryOrder = useCallback((order: LaundryOrder) => {
-    setState((prev) => ({ ...prev, laundry: [order, ...prev.laundry] }));
+  const addLaundryLoad = useCallback((load: LaundryLoad) => {
+    setState((prev) => ({ ...prev, laundry: [load, ...prev.laundry] }));
   }, []);
 
-  const advanceLaundry = useCallback((id: string) => {
-    const nextStatus: Record<LaundryStatus, LaundryStatus> = {
-      enviado: "en_proceso",
-      en_proceso: "recibido",
-      recibido: "recibido",
+  const advanceLaundryLoad = useCallback((id: string) => {
+    const NEXT: Record<LaundryStage, LaundryStage | null> = {
+      recolectado: "lavando",
+      lavando: "secando",
+      secando: "doblando",
+      doblando: "listo",
+      listo: null,
     };
+    setState((prev) => {
+      const load = prev.laundry.find((l) => l.id === id);
+      if (!load) return prev;
+      const next = NEXT[load.stage];
+      if (!next) return prev;
+      const machine =
+        next === "lavando"
+          ? freeMachineName(prev.laundry, "lavadora")
+          : next === "secando"
+            ? freeMachineName(prev.laundry, "secadora")
+            : undefined;
+      return {
+        ...prev,
+        laundry: prev.laundry.map((l) =>
+          l.id === id ? { ...l, stage: next, machine, startedAt: new Date().toISOString() } : l,
+        ),
+      };
+    });
+  }, []);
+
+  const takeLaundryLoad = useCallback((id: string, by?: string) => {
     setState((prev) => ({
       ...prev,
-      laundry: prev.laundry.map((o) => {
-        if (o.id !== id || o.status === "recibido") return o;
-        const status = nextStatus[o.status];
-        return {
-          ...o,
-          status,
-          receivedAt: status === "recibido" ? new Date().toISOString() : o.receivedAt,
-        };
-      }),
+      laundry: prev.laundry.map((l) => (l.id === id && !l.by ? { ...l, by } : l)),
     }));
   }, []);
 
-  const takeLaundry = useCallback((id: string, by?: string) => {
-    setState((prev) => ({
-      ...prev,
-      laundry: prev.laundry.map((o) => (o.id === id && !o.takenBy ? { ...o, takenBy: by } : o)),
-    }));
+  const addLinenIncident = useCallback((incident: LinenIncident) => {
+    setState((prev) => ({ ...prev, linenIncidents: [incident, ...prev.linenIncidents] }));
   }, []);
 
   const addReceivable = useCallback((receivable: Receivable) => {
@@ -874,9 +925,55 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, shopSettings: { ...prev.shopSettings, ...patch } }));
   }, []);
 
+  const addProvider = useCallback((provider: Provider) => {
+    setState((prev) =>
+      prev.providers.some((p) => p.name.toLowerCase() === provider.name.toLowerCase())
+        ? prev
+        : { ...prev, providers: [...prev.providers, provider] },
+    );
+  }, []);
+
+  const addProductCategory = useCallback((name: string) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setState((prev) =>
+      prev.productCategories.includes(clean)
+        ? prev
+        : { ...prev, productCategories: [...prev.productCategories, clean] },
+    );
+  }, []);
+
+  const addPurchase = useCallback((purchase: Purchase) => {
+    setState((prev) => {
+      const movements: InventoryMovement[] = purchase.items.map((item, i) => ({
+        id: `${makeId("m")}-${i}`,
+        productId: item.productId,
+        type: "ingreso",
+        quantity: item.quantity,
+        at: purchase.at,
+        refId: purchase.id,
+        user: purchase.user,
+      }));
+      const products = prev.products.map((p) => {
+        const item = purchase.items.find((it) => it.productId === p.id);
+        return item ? { ...p, stock: p.stock + item.quantity } : p;
+      });
+      return {
+        ...prev,
+        products,
+        movements: [...movements, ...prev.movements],
+        purchases: [purchase, ...prev.purchases],
+      };
+    });
+  }, []);
+
   const resetDemo = useCallback(() => {
     const fresh = seedState();
-    setState({ ...fresh, rooms: seedRoomTimes(fresh.rooms) });
+    setState({
+      ...fresh,
+      rooms: seedRoomTimes(fresh.rooms),
+      laundry: seedLaundryTimes(fresh.laundry),
+    });
   }, []);
 
   const value: AppStore = {
@@ -891,9 +988,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     reportMaintenance,
     addAnomaly,
     resolveAnomaly,
-    addLaundryOrder,
-    advanceLaundry,
-    takeLaundry,
+    addLaundryLoad,
+    advanceLaundryLoad,
+    takeLaundryLoad,
+    addLinenIncident,
     addReceivable,
     markReceivablePaid,
     addRoomServiceOrder,
@@ -928,6 +1026,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     addCoupon,
     updateCoupon,
     updateShopSettings,
+    addPurchase,
+    addProvider,
+    addProductCategory,
     resetDemo,
   };
 

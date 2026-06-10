@@ -3,13 +3,10 @@
 import { CatalogList } from "@/components/public/CatalogList";
 import { buttonStyles } from "@/components/ui/Button";
 import { useAppStore } from "@/lib/store";
-import { useVisitor } from "@/lib/visitor";
 import { whatsappUrl } from "@/lib/whatsapp";
 
 export default function CartaPage() {
   const { products } = useAppStore();
-  const { visitor, openPrompt } = useVisitor();
-  const registered = visitor?.mode === "registered";
   const carta = products.filter((p) => p.active && p.channels.includes("room_service"));
   const wa = whatsappUrl("Hola, quiero hacer un pedido de room service en M Motel.");
 
@@ -33,26 +30,16 @@ export default function CartaPage() {
           >
             Pedir por WhatsApp
           </a>
-          {registered ? (
-            <p className="text-xs text-dim">
-              Arma tu pedido agregando platos y envíalo de una vez desde “Mi pedido”.
-            </p>
-          ) : (
-            <button
-              type="button"
-              onClick={openPrompt}
-              className="text-xs uppercase tracking-[0.14em] text-gold transition-colors hover:text-gold-soft"
-            >
-              Regístrate para pedir en línea
-            </button>
-          )}
+          <p className="text-xs text-dim">
+            Arma tu pedido y, al finalizar, valida tu reserva con tu RUT y habitación.
+          </p>
         </div>
       </header>
 
       {carta.length === 0 ? (
         <p className="text-sm text-muted">Carta no disponible por ahora.</p>
       ) : (
-        <CatalogList products={carta} quickOrder={registered} />
+        <CatalogList products={carta} quickOrder />
       )}
 
       <p className="mt-14 border-t border-line pt-6 text-xs leading-relaxed text-dim">

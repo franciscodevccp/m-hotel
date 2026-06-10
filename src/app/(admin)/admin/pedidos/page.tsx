@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/Select";
 import { formatCLP, formatDate, formatDateTime } from "@/lib/format";
 import {
   FULFILLMENT_LABEL,
+  fulfillmentLine,
   PAYMENT_LABEL,
   SHOP_ADVANCE_LABEL,
   SHOP_NEXT,
@@ -125,7 +126,7 @@ export default function PedidosPage() {
                     </td>
                     <td className="px-4 py-3 text-muted">{formatDate(new Date(o.createdAt))}</td>
                     <td className="hidden px-4 py-3 text-muted sm:table-cell">
-                      {o.fulfillment === "despacho" ? `Despacho · ${o.comuna}` : "Retiro en local"}
+                      {fulfillmentLine(o)}
                     </td>
                     <td className="tnum px-4 py-3 text-right text-gold">{formatCLP(o.total)}</td>
                     <td className="px-4 py-3 text-right">
@@ -216,6 +217,9 @@ function OrderDetail({
               <p className="text-xs text-muted">
                 {order.address}, {order.comuna}
               </p>
+            )}
+            {order.fulfillment === "habitacion" && order.address && (
+              <p className="text-xs text-muted">{order.address}</p>
             )}
           </div>
           <div>

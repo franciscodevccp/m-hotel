@@ -1,16 +1,11 @@
 "use client";
 
 import { useCartaOrder } from "@/lib/cartaOrder";
-import { useVisitor } from "@/lib/visitor";
 import type { Product } from "@/types";
 
-/** Agregar un plato al pedido de la carta; con stepper si ya está en el pedido. Solo registrados. */
+/** Agregar un plato al pedido de la carta; con stepper si ya está en el pedido. */
 export function AddToOrderButton({ product }: { product: Product }) {
-  const { visitor } = useVisitor();
   const { qtyOf, add, setQty } = useCartaOrder();
-
-  if (visitor?.mode !== "registered") return null;
-
   const qty = qtyOf(product.id);
   const snapshot = { productId: product.id, name: product.name, price: product.price };
 

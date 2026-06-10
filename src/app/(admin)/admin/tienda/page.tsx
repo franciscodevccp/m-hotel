@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { AdminOnly } from "@/components/admin/AdminOnly";
 import { formatCLP } from "@/lib/format";
 import {
+  fulfillmentLine,
   isRealized,
   needsAction,
   SHOP_STATUS_CLASS,
@@ -83,7 +84,7 @@ export default function TiendaResumenPage() {
                         #{o.folio} · {o.customerName}
                       </p>
                       <p className="text-xs text-dim">
-                        {o.fulfillment === "despacho" ? `Despacho · ${o.comuna}` : "Retiro en local"}
+                        {fulfillmentLine(o)}
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end">

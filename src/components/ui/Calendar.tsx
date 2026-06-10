@@ -38,11 +38,13 @@ interface CalendarProps {
   /** Fecha seleccionada en formato YYYY-MM-DD. */
   value: string | null;
   onChange: (date: string) => void;
+  /** Permite elegir y navegar fechas pasadas (p. ej. para filtros). */
+  allowPast?: boolean;
   className?: string;
 }
 
-/** Calendario de marca: mes navegable, día seleccionado en dorado, pasado deshabilitado. */
-export function Calendar({ value, onChange, className }: CalendarProps) {
+/** Calendario de marca: mes navegable, día seleccionado en dorado. */
+export function Calendar({ value, onChange, allowPast = false, className }: CalendarProps) {
   const [cal, setCal] = useState<{ today: Date; view: { y: number; m: number } } | null>(null);
 
   useEffect(() => {
@@ -82,7 +84,7 @@ export function Calendar({ value, onChange, className }: CalendarProps) {
         <button
           type="button"
           onClick={() => shift(-1)}
-          disabled={atCurrentMonth}
+          disabled={!allowPast && atCurrentMonth}
           aria-label="Mes anterior"
           className="flex size-9 items-center justify-center rounded-sm border border-line text-muted transition-colors hover:border-gold/60 hover:text-gold disabled:pointer-events-none disabled:opacity-30"
         >
@@ -118,13 +120,13 @@ export function Calendar({ value, onChange, className }: CalendarProps) {
             <button
               key={ds}
               type="button"
-              disabled={isPast}
+              disabled={!allowPast && isPast}
               onClick={() => onChange(ds)}
               className={cn(
                 "tnum flex h-11 items-center justify-center rounded-sm text-sm transition-colors",
                 isSelected
                   ? "bg-gold text-bg"
-                  : isPast
+                  : isPast && !allowPast
                     ? "text-dim/40"
                     : "text-cream hover:bg-surface-2",
                 !isSelected && isToday && "border border-gold/50",

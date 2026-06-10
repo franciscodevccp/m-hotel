@@ -5,7 +5,6 @@ import type { Category, DayType, Duration } from "@/types";
 interface SummaryPanelProps {
   category: Category | null;
   dateLabel?: string;
-  roomLabel?: string;
   dayType: DayType;
   duration: Duration | null;
   arrivalLabel?: string;
@@ -27,7 +26,6 @@ function Row({ label, value, muted }: { label: string; value: string; muted?: bo
 export function SummaryPanel({
   category,
   dateLabel,
-  roomLabel,
   dayType,
   duration,
   arrivalLabel,
@@ -42,7 +40,6 @@ export function SummaryPanel({
       <dl className="mt-5 space-y-4">
         <Row label="Fecha" value={dateLabel ?? "Por elegir"} muted={!dateLabel} />
         <Row label="Categoría" value={category ? category.name : "Por elegir"} muted={!category} />
-        <Row label="Habitación" value={roomLabel ?? "Por elegir"} muted={!roomLabel} />
         <Row label="Día" value={dateLabel ? DAY_LABELS[dayType] : "—"} muted={!dateLabel} />
         <Row
           label="Bloque"

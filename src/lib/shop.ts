@@ -69,7 +69,15 @@ export const SHOP_ADVANCE_LABEL: Record<ShopOrderStatus, string> = {
 export const FULFILLMENT_LABEL: Record<ShopFulfillment, string> = {
   despacho: "Despacho a domicilio",
   retiro: "Retiro en local",
+  habitacion: "A la habitación",
 };
+
+/** Línea corta de entrega para listas (con comuna/habitación según el caso). */
+export function fulfillmentLine(o: ShopOrder): string {
+  if (o.fulfillment === "despacho") return `Despacho · ${o.comuna ?? ""}`;
+  if (o.fulfillment === "habitacion") return o.address ?? "A la habitación";
+  return "Retiro en local";
+}
 
 export const PAYMENT_LABEL: Record<ShopPaymentMethod, string> = {
   webpay: "Webpay",
