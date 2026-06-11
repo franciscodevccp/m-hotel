@@ -70,6 +70,7 @@ export default function ConfiguracionPage() {
   const [userRole, setUserRole] = useState<Role>("recepcion");
   const [blModal, setBlModal] = useState(false);
   const [blName, setBlName] = useState("");
+  const [blRut, setBlRut] = useState("");
   const [blReason, setBlReason] = useState("");
 
   if (user && user.role !== "admin") {
@@ -109,10 +110,12 @@ export default function ConfiguracionPage() {
     const entry: BlacklistEntry = {
       id: makeId("b"),
       name: blName.trim(),
+      rut: blRut.trim() || undefined,
       reason: blReason.trim(),
     };
     addBlacklistEntry(entry);
     setBlName("");
+    setBlRut("");
     setBlReason("");
     setBlModal(false);
   }
@@ -310,8 +313,16 @@ export default function ConfiguracionPage() {
               {blacklist.map((b) => (
                 <li key={b.id} className="flex items-start justify-between gap-4 py-3">
                   <div className="min-w-0">
-                    <p className="text-sm text-cream">{b.name}</p>
+                    <p className="text-sm text-cream">
+                      {b.name}
+                      {b.rut && <span className="tnum text-dim"> · {b.rut}</span>}
+                    </p>
                     {b.reason && <p className="mt-1 text-xs text-dim">{b.reason}</p>}
+                    {b.rut ? (
+                      <p className="mt-1 text-xs text-ok">Alerta automática al escanear cédula</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-dim">Sin RUT: no alerta en el escaneo</p>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -435,6 +446,21 @@ export default function ConfiguracionPage() {
                 placeholder="Nombre o referencia"
                 className={fieldClass}
               />
+            </div>
+            <div>
+              <label className="kicker text-dim" htmlFor="bl-rut">
+                RUT (opcional)
+              </label>
+              <input
+                id="bl-rut"
+                value={blRut}
+                onChange={(e) => setBlRut(e.target.value)}
+                placeholder="12.345.678-9"
+                className={fieldClass}
+              />
+              <p className="mt-2 text-xs leading-relaxed text-dim">
+                Con RUT, el sistema alerta solo al escanear la cédula en un check-in.
+              </p>
             </div>
             <div>
               <label className="kicker text-dim" htmlFor="bl-reason">

@@ -25,7 +25,8 @@ import type {
 
 const METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "cash", label: "Efectivo" },
-  { value: "card", label: "Tarjeta" },
+  { value: "debit", label: "Tarjeta débito" },
+  { value: "credit", label: "Tarjeta crédito" },
   { value: "transfer", label: "Transferencia" },
 ];
 
@@ -49,7 +50,7 @@ function Row({ label, value, accent }: { label: string; value: string; accent?: 
   );
 }
 
-type ModalKind = "payment" | "sale" | "expense" | "print" | "close" | null;
+type ModalKind = "payment" | "sale" | "expense" | "print" | "cuadratura" | "close" | null;
 
 export default function CajaPage() {
   const {
@@ -58,9 +59,11 @@ export default function CajaPage() {
     shift,
     products,
     movements,
+    cuadraturas,
     addTransaction,
     addExpense,
     sellProduct,
+    logCuadratura,
     closeShift,
   } = useAppStore();
   const { user } = useSession();
@@ -153,7 +156,46 @@ export default function CajaPage() {
 
       <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
         <div className="space-y-6">
-          <ShiftSummary shift={shift} />
+          <ShiftSummary shift={shift} transactions={transactions} />
+
+          {/* Cuadraturas parciales del turno */}
+          {cuadraturas.length > 0 && (
+            <div className="border border-line bg-surface/40">
+              <div className="border-b border-line px-5 py-3">
+                <span className="kicker text-dim">Cuadraturas del turno</span>
+              </div>
+              <ul className="divide-y divide-line">
+                {cuadraturas.map((c) => {
+                  const diff =
+                    c.counted.cash -
+                    c.expected.cash +
+                    (c.counted.debit - c.expected.debit) +
+                    (c.counted.credit - c.expected.credit) +
+                    (c.counted.transfer - c.expected.transfer);
+                  return (
+                    <li key={c.id} className="flex items-baseline justify-between gap-4 px-5 py-3">
+                      <span className="text-sm text-muted">
+                        {new Date(c.at).toLocaleTimeString("es-CL", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}{" "}
+                        · {c.user}
+                      </span>
+                      <span
+                        className={cn(
+                          "tnum text-sm",
+                          diff < 0 ? "text-busy" : diff > 0 ? "text-gold" : "text-ok",
+                        )}
+                      >
+                        {diff === 0 ? "Cuadrada" : formatCLP(diff)}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <Button className="w-full" onClick={() => setModal("payment")}>
@@ -169,7 +211,10 @@ export default function CajaPage() {
                 Imprimir corte
               </Button>
             </div>
-            <div className="border-t border-line pt-4">
+            <div className="grid grid-cols-2 gap-3 border-t border-line pt-4">
+              <Button variant="secondary" className="w-full" onClick={() => setModal("cuadratura")}>
+                Cuadratura parcial
+              </Button>
               <Button variant="ghost" className="w-full" onClick={() => setModal("close")}>
                 Cerrar turno
               </Button>
@@ -200,7 +245,7 @@ export default function CajaPage() {
 
             <div>
               <span className="kicker text-dim">Medio de pago</span>
-              <div className="mt-2 grid grid-cols-3 gap-2">
+              <div className="mt-2 grid grid-cols-2 gap-2">
                 {METHODS.map((m) => (
                   <button
                     key={m.value}
@@ -368,6 +413,18 @@ export default function CajaPage() {
         </Modal>
       )}
 
+      {/* Cuadratura parcial: arqueo intermedio sin cerrar el turno */}
+      {modal === "cuadratura" && (
+        <CuadraturaModal
+          shift={shift}
+          onClose={() => setModal(null)}
+          onConfirm={(counted) => {
+            logCuadratura(counted, userLabel, actor);
+            setModal(null);
+          }}
+        />
+      )}
+
       {/* Cerrar turno: arqueo de caja */}
       {modal === "close" && (
         <CloseShiftModal
@@ -379,6 +436,69 @@ export default function CajaPage() {
         />
       )}
     </div>
+  );
+}
+
+function CuadraturaModal({
+  shift,
+  onClose,
+  onConfirm,
+}: {
+  shift: Shift;
+  onClose: () => void;
+  onConfirm: (counted: Record<PaymentMethod, number>) => void;
+}) {
+  // Mismo arqueo del cierre, pero sin cerrar: deja la cuadratura registrada.
+  const [counted, setCounted] = useState<Record<PaymentMethod, number>>({
+    cash: shift.cash.expected,
+    debit: shift.debit.expected,
+    credit: shift.credit.expected,
+    transfer: shift.transfer.expected,
+  });
+
+  const FIELDS: { key: PaymentMethod; label: string }[] = [
+    { key: "cash", label: "Efectivo contado" },
+    { key: "debit", label: "Comprobantes débito" },
+    { key: "credit", label: "Comprobantes crédito" },
+    { key: "transfer", label: "Transferencias verificadas" },
+  ];
+  const expected: Record<PaymentMethod, number> = {
+    cash: shift.cash.expected,
+    debit: shift.debit.expected,
+    credit: shift.credit.expected,
+    transfer: shift.transfer.expected,
+  };
+
+  return (
+    <Modal
+      title="Cuadratura parcial"
+      subtitle={`Turno en curso · Folio ${shift.folio}`}
+      onClose={onClose}
+    >
+      <p className="text-sm leading-relaxed text-muted">
+        Arqueo intermedio sin cerrar la caja: cuenta lo que hay ahora y compara contra lo que el
+        sistema espera. Queda registrado con hora y responsable.
+      </p>
+      <div className="mt-5 space-y-4">
+        {FIELDS.map((f) => (
+          <div key={f.key}>
+            <label className="kicker text-dim" htmlFor={`cq-${f.key}`}>
+              {f.label}
+            </label>
+            <MoneyInput
+              id={`cq-${f.key}`}
+              value={counted[f.key]}
+              onValueChange={(v) => setCounted((c) => ({ ...c, [f.key]: v }))}
+              className={fieldClass}
+            />
+            <ArqueoDiff diff={counted[f.key] - expected[f.key]} />
+          </div>
+        ))}
+      </div>
+      <Button className="mt-5 w-full" onClick={() => onConfirm(counted)}>
+        Registrar cuadratura
+      </Button>
+    </Modal>
   );
 }
 
@@ -406,16 +526,33 @@ function CloseShiftModal({
 }: {
   shift: Shift;
   onClose: () => void;
-  onConfirm: (counted: { cash: number; card: number }, nextOpeningCash: number) => void;
+  onConfirm: (counted: Record<PaymentMethod, number>, nextOpeningCash: number) => void;
 }) {
   // El arqueo parte en lo que el sistema espera; el cajero corrige con lo contado.
-  const [countedCash, setCountedCash] = useState(shift.cash.expected);
-  const [countedCard, setCountedCard] = useState(shift.card.expected);
+  // Cada medio se cuenta por separado (pedido del cliente).
+  const [counted, setCounted] = useState<Record<PaymentMethod, number>>({
+    cash: shift.cash.expected,
+    debit: shift.debit.expected,
+    credit: shift.credit.expected,
+    transfer: shift.transfer.expected,
+  });
   const [nextOpening, setNextOpening] = useState(15000);
   const [closedFolio, setClosedFolio] = useState<number | null>(null);
 
-  const cashD = countedCash - shift.cash.expected;
-  const cardD = countedCard - shift.card.expected;
+  const diffs: Record<PaymentMethod, number> = {
+    cash: counted.cash - shift.cash.expected,
+    debit: counted.debit - shift.debit.expected,
+    credit: counted.credit - shift.credit.expected,
+    transfer: counted.transfer - shift.transfer.expected,
+  };
+  const anyDiff = Object.values(diffs).some((d) => d !== 0);
+
+  const COUNT_FIELDS: { key: PaymentMethod; label: string; hint: string }[] = [
+    { key: "cash", label: "Efectivo contado", hint: "" },
+    { key: "debit", label: "Comprobantes débito", hint: "" },
+    { key: "credit", label: "Comprobantes crédito", hint: "" },
+    { key: "transfer", label: "Transferencias verificadas", hint: "" },
+  ];
 
   if (closedFolio != null) {
     return (
@@ -440,37 +577,29 @@ function CloseShiftModal({
     <Modal title="Cierre de turno" subtitle={`Arqueo · Folio ${shift.folio}`} onClose={onClose}>
       <dl className="space-y-3">
         <Row label="Efectivo esperado" value={formatCLP(shift.cash.expected)} />
-        <Row label="Tarjeta esperada" value={formatCLP(shift.card.expected)} />
+        <Row label="Débito esperado" value={formatCLP(shift.debit.expected)} />
+        <Row label="Crédito esperado" value={formatCLP(shift.credit.expected)} />
+        <Row label="Transferencia esperada" value={formatCLP(shift.transfer.expected)} />
         <Row label="Ingresos totales" value={formatCLP(ingresosTotales(shift))} />
         <Row label="Gastos" value={formatCLP(shift.expenses.real)} />
         <Row label="Utilidad del turno" value={formatCLP(utilidadTurno(shift))} accent />
       </dl>
 
       <div className="mt-5 space-y-4 border-t border-line pt-5">
-        <div>
-          <label className="kicker text-dim" htmlFor="counted-cash">
-            Efectivo contado
-          </label>
-          <MoneyInput
-            id="counted-cash"
-            value={countedCash}
-            onValueChange={setCountedCash}
-            className={fieldClass}
-          />
-          <ArqueoDiff diff={cashD} />
-        </div>
-        <div>
-          <label className="kicker text-dim" htmlFor="counted-card">
-            Comprobantes tarjeta
-          </label>
-          <MoneyInput
-            id="counted-card"
-            value={countedCard}
-            onValueChange={setCountedCard}
-            className={fieldClass}
-          />
-          <ArqueoDiff diff={cardD} />
-        </div>
+        {COUNT_FIELDS.map((f) => (
+          <div key={f.key}>
+            <label className="kicker text-dim" htmlFor={`counted-${f.key}`}>
+              {f.label}
+            </label>
+            <MoneyInput
+              id={`counted-${f.key}`}
+              value={counted[f.key]}
+              onValueChange={(v) => setCounted((c) => ({ ...c, [f.key]: v }))}
+              className={fieldClass}
+            />
+            <ArqueoDiff diff={diffs[f.key]} />
+          </div>
+        ))}
         <div>
           <label className="kicker text-dim" htmlFor="next-opening">
             Caja inicial del próximo turno
@@ -485,7 +614,7 @@ function CloseShiftModal({
       </div>
 
       <p className="mt-4 text-xs leading-relaxed text-dim">
-        {cashD !== 0 || cardD !== 0
+        {anyDiff
           ? "La diferencia queda registrada en el corte archivado, con responsable y hora."
           : "La caja cuadra con lo esperado."}
       </p>
@@ -493,7 +622,7 @@ function CloseShiftModal({
       <Button
         className="mt-5 w-full"
         onClick={() => {
-          onConfirm({ cash: countedCash, card: countedCard }, nextOpening);
+          onConfirm(counted, nextOpening);
           setClosedFolio(shift.folio);
         }}
       >

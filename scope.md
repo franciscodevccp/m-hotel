@@ -10,8 +10,8 @@ Alcance cerrado. Lo que no está acá, no se construye (se deja como placeholder
 
 **Landing (`/`)**
 - Hero a sangre, oscuro, con titular serif y CTA "Reservar".
-- Cifras de M: 4.3★ (198 reseñas), 20 habitaciones, atención 24/7, room service.
-- Sección de las 4 categorías (tarjetas editoriales con "desde $XX.000").
+- Cifras de M: 4.3★ (198 reseñas), 21 habitaciones, atención 24/7, room service.
+- Sección de las 5 categorías (tarjetas editoriales con "desde $XX.000").
 - Bloque de servicios: room service gourmet 24h, jacuzzi, estacionamiento, discreción.
 - Footer: dirección (Av. Palmira Romano Sur 196-A, Limache), WhatsApp, cómo llegar.
 
@@ -31,7 +31,7 @@ Alcance cerrado. Lo que no está acá, no se construye (se deja como placeholder
 - Resumen del día: ocupación actual, ingresos del turno, reservas próximas, habitaciones por estado. Cifras mock.
 
 **Habitaciones (`/admin/habitaciones`)**
-- Tablero de las 20 habitaciones con su estado (disponible / ocupada / limpieza / mantención) y, si está ocupada, tiempo restante del bloque. Permite cambiar estado (solo en memoria).
+- Tablero de las 21 habitaciones con su estado (disponible / ocupada / limpieza / mantención) y, si está ocupada, tiempo restante del bloque. Permite cambiar estado (solo en memoria).
 
 **Caja y turnos (`/admin/caja`)** — el módulo estrella del pitch.
 - Registrar pagos (efectivo / tarjeta / transferencia) asociados a una habitación.
@@ -50,7 +50,7 @@ Alcance cerrado. Lo que no está acá, no se construye (se deja como placeholder
 
 Pasos, con resumen sticky siempre visible:
 
-1. **Categoría** — elegir entre las 4 (tarjetas con m² y "desde").
+1. **Categoría** — elegir entre las 5 (tarjetas con m² y "desde").
 2. **Día** — toggle "Entre semana (Lun–Jue)" / "Fin de semana y festivos (Vie–Dom)". Cambia todos los precios.
 3. **Bloque de horas** — chips 3h / 6h / 12h, cada uno mostrando su precio para el día elegido. (La "hora adicional" se menciona como nota, no es seleccionable en la demo.)
 4. **Datos mínimos** — nombre y teléfono. Nada de pagos. Tono discreto, pedir lo mínimo.
@@ -68,16 +68,19 @@ Notas UX (de la investigación):
 
 Centralizar en `src/lib/pricing.ts`. Regla: dos tarifas según el día.
 - **Entre semana** = Lunes a Jueves.
-- **Fin de semana y festivos** = Viernes a Domingo (y festivos).
+- **Fin de semana y festivos** = Viernes a Domingo (y festivos; víspera de festivo desde las 14:00).
 
-Montos en CLP. Formato `$45.000`.
+Montos en CLP. Formato `$45.000`. Valores del tarifario 2026 del cliente.
 
-| Categoría | m² | Entre semana 3h / 6h / 12h | +hora | Finde/festivo 3h / 6h / 12h | +hora |
+| Categoría | m² | Entre semana 3h / 6h / 12h | Finde/festivo 3h / 6h / 12h | +hora | +persona |
 |---|---|---|---|---|---|
-| Standard Vip | 22 | 35.000 / 50.000 / 65.000 | 20.000 | 40.000 / 60.000 / 80.000 | 23.000 |
-| Vip con Jacuzzi | 22 | 45.000 / 75.000 / 85.000 | 23.000 | 50.000 / 85.000 / 95.000 | 25.000 |
-| Jacuzzi Premium | 27 | 50.000 / 80.000 / 90.000 | 23.000 | 55.000 / 90.000 / 115.000 | 25.000 |
-| BLACK | 29 | 55.000 / 85.000 / 105.000 | 25.000 | 65.000 / 100.000 / 125.000 | 30.000 |
+| Standard VIP | 22 | 35.000 / 50.000 / 65.000 | 40.000 / 60.000 / 80.000 | 20.000 | 23.000 |
+| Standard Black | 22 | 40.000 / 55.000 / 70.000 | 45.000 / 65.000 / 85.000 | 20.000 | 23.000 |
+| Jacuzzi VIP | 22 | 45.000 / 75.000 / 85.000 | 50.000 / 85.000 / 95.000 | 23.000 | 25.000 |
+| Jacuzzi Premium | 27 | 50.000 / 80.000 / 90.000 | 55.000 / 90.000 / 115.000 | 23.000 | 25.000 |
+| Jacuzzi Black | 29 | 55.000 / 85.000 / 105.000 | 65.000 / 100.000 / 125.000 | 23.000 | 25.000 |
+
+La hora y la persona adicional valen lo mismo entre semana y el fin de semana.
 
 ---
 
@@ -93,12 +96,13 @@ export interface CategoryPricing {
   weekday: Record<Duration, number>;
   weekend: Record<Duration, number>;
   extraHour: { weekday: number; weekend: number };
+  extraPerson: { weekday: number; weekend: number };
 }
 
 export interface Category {
-  id: "standard" | "vip-jacuzzi" | "jacuzzi-premium" | "black";
-  name: string;        // "Categoría BLACK"
-  shortName: string;   // "BLACK"
+  id: "standard-vip" | "standard-black" | "jacuzzi-vip" | "jacuzzi-premium" | "jacuzzi-black";
+  name: string;        // "Jacuzzi Black"
+  shortName: string;   // "Jacuzzi Black"
   area: number;        // m²
   amenities: string[]; // ["Jacuzzi privado", "Cama king", "TV", "Wi-Fi", "Room service 24h"]
   pricing: CategoryPricing;
@@ -149,8 +153,8 @@ export interface Shift {
 ```
 
 Datos mock a precargar:
-- **4 categorías** con sus precios reales (tabla de arriba) y amenidades reales (jacuzzi privado, cama king, TV, Wi-Fi, room service 24h; estacionamiento a nivel motel).
-- **20 habitaciones** distribuidas (sugerencia, ajustable): 8 Standard Vip, 6 Vip con Jacuzzi, 4 Jacuzzi Premium, 2 BLACK. Mezcla de estados para que el tablero se vea vivo.
+- **5 categorías** con sus precios reales (tabla de arriba) y amenidades reales (jacuzzi privado, cama king, TV, Wi-Fi, room service 24h; estacionamiento a nivel motel).
+- **21 habitaciones** con su numeración real: 1-2-3-6-7-8-9 Standard VIP, 19-20-21 Standard Black, 4-5 Jacuzzi VIP, 10-11-12-13-14 Jacuzzi Premium, 15-16-17-18 Jacuzzi Black. Mezcla de estados para que el tablero se vea vivo.
 - **Reservas** y **transacciones** de ejemplo para poblar admin.
 - Un **turno** abierto con un pequeño descuadre, para demostrar el cuadre de caja.
 

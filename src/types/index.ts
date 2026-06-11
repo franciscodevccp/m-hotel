@@ -7,12 +7,18 @@ export type DayType = "weekday" | "weekend";
 export type Duration = 3 | 6 | 12;
 
 /** Identificador estable de cada categoría. */
-export type CategoryId = "standard" | "vip-jacuzzi" | "jacuzzi-premium" | "black";
+export type CategoryId =
+  | "standard-vip"
+  | "standard-black"
+  | "jacuzzi-vip"
+  | "jacuzzi-premium"
+  | "jacuzzi-black";
 
 export interface CategoryPricing {
   weekday: Record<Duration, number>;
   weekend: Record<Duration, number>;
   extraHour: { weekday: number; weekend: number };
+  extraPerson: { weekday: number; weekend: number };
 }
 
 export interface Category {
@@ -36,6 +42,9 @@ export interface RoomStay {
   guestName?: string;
   guestRut?: string; // del registro rápido (escaneo de cédula: solo datos, sin imagen)
   checkInAt: string; // ISO
+  paid?: boolean; // el bloque se cobra en la pieza, al inicio
+  paymentMethod?: PaymentMethod;
+  paidAt?: string; // ISO
 }
 
 export interface Room {
@@ -70,7 +79,33 @@ export interface Reservation {
   branchId?: string;
 }
 
-export type PaymentMethod = "cash" | "card" | "transfer";
+export type PaymentMethod = "cash" | "debit" | "credit" | "transfer";
+
+/**
+ * Ticket interno generado al confirmar la estadía: lleva el valor a cobrar y
+ * la cortesía a preparar. La camarera lo cobra en la pieza desde su dispositivo.
+ */
+export interface RoomCharge {
+  id: string;
+  roomId: string;
+  concept: string; // "Bloque 6 h" / "Hora adicional"
+  amount: number; // valor a cobrar
+  courtesies: string[]; // cortesías pedidas por citófono ("2× Alkas", …)
+  status: "pendiente" | "pagado";
+  createdAt: string; // ISO
+  paidAt?: string; // ISO
+  method?: PaymentMethod;
+  by?: string; // quién cobró (camarera o recepción)
+}
+
+/** Cuadratura parcial del turno: arqueo intermedio sin cerrar la caja. */
+export interface Cuadratura {
+  id: string;
+  at: string; // ISO
+  user: string;
+  counted: Record<PaymentMethod, number>; // contado al momento
+  expected: Record<PaymentMethod, number>; // lo que el sistema esperaba
+}
 
 export interface Transaction {
   id: string;
@@ -89,8 +124,9 @@ export interface CashLine {
 }
 
 /**
- * Turno con la estructura del corte de caja real que imprime el cliente:
- * dinero en caja, pagos con tarjeta y gastos (cada uno real/deber), mas propinas.
+ * Turno con la estructura del corte de caja real que imprime el cliente.
+ * Cada medio de pago lleva su propia línea real/deber en el arqueo
+ * (pedido del cliente: efectivo, débito, crédito y transferencia separados).
  */
 export interface Shift {
   id: string;
@@ -100,7 +136,9 @@ export interface Shift {
   closedAt?: string;
   openingCash: number; // caja inicial
   cash: CashLine; // efectivo
-  card: CashLine; // tarjeta (incluye transferencias)
+  debit: CashLine; // tarjeta de débito
+  credit: CashLine; // tarjeta de crédito
+  transfer: CashLine; // transferencias bancarias
   expenses: CashLine; // gastos del turno
   tipsCash: number; // propina en efectivo
   tipsCard: number; // propina en tarjeta
@@ -119,11 +157,11 @@ export interface ShiftItem {
 /** Corte cerrado y archivado, con snapshot de su detalle al momento del arqueo. */
 export interface ClosedShift extends Shift {
   closedAt: string; // ISO del cierre
-  countedCash: number; // efectivo contado en el arqueo
-  countedCard: number; // comprobantes de tarjeta contados
+  counted: Record<PaymentMethod, number>; // contado por medio en el arqueo
   transactions: Transaction[]; // snapshot de los pagos del turno
   expenseList: Expense[]; // snapshot de los gastos del turno
   items: ShiftItem[]; // artículos vendidos (snapshot del ticket)
+  cuadraturas?: Cuadratura[]; // cuadraturas parciales hechas durante el turno
 }
 
 export type ExpenseCategory = "insumos" | "mantencion" | "sueldos" | "servicios" | "otro";
@@ -470,7 +508,21 @@ export interface StaffUser {
 export interface BlacklistEntry {
   id: string;
   name: string;
+  rut?: string; // si está, el escaneo de cédula alerta solo
   reason: string;
+}
+
+/** Huésped del historial interno: visitas, frecuencia y observaciones. */
+export interface Guest {
+  id: string;
+  name: string;
+  rut?: string;
+  phone?: string;
+  visits: number; // visitas registradas
+  lastVisit: string; // ISO
+  totalSpent: number; // CLP acumulado
+  tags: ("vip" | "frecuente")[];
+  notes?: string; // observaciones internas de recepción
 }
 
 /** Usuario de sesion simulado del panel. */

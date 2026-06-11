@@ -1,10 +1,16 @@
-import { getCategory } from "@/lib/pricing";
+import { getCategory, isBlackLine } from "@/lib/pricing";
 import type { CategoryId, InventoryMovement, Product, Reservation, Transaction } from "@/types";
 
 // Selectores de reportes derivados del estado real del store. Cada uno se mueve
 // solo cuando ocurre la operación correspondiente (reserva, pago, venta).
 
-const CATEGORY_ORDER: CategoryId[] = ["standard", "vip-jacuzzi", "jacuzzi-premium", "black"];
+const CATEGORY_ORDER: CategoryId[] = [
+  "standard-vip",
+  "standard-black",
+  "jacuzzi-vip",
+  "jacuzzi-premium",
+  "jacuzzi-black",
+];
 
 /** Monto de reservas agrupado por categoría de habitación. */
 export function ingresosPorCategoria(reservations: Reservation[]) {
@@ -15,7 +21,7 @@ export function ingresosPorCategoria(reservations: Reservation[]) {
   return CATEGORY_ORDER.map((id) => ({
     cat: getCategory(id).shortName,
     monto: byCat.get(id) ?? 0,
-    black: id === "black",
+    black: isBlackLine(id),
   }));
 }
 

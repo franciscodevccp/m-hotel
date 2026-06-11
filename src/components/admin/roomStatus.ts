@@ -1,8 +1,8 @@
 import type { RoomStatus } from "@/types";
 
-// Meta de estados de habitación. Desde la v2, el tablero pinta la tarjeta
-// completa con el color del estado (verde libre, azul ocupada, ámbar limpieza,
-// gris mantención): identificación a golpe de vista, pedida por el cliente.
+// Meta de estados de habitación. El tablero pinta la tarjeta completa con el
+// código operacional del cliente: verde disponible, rojo ocupada, celeste
+// limpieza, amarillo mantención/bloqueada. Identificación a golpe de vista.
 export const ROOM_STATUS: Record<
   RoomStatus,
   { label: string; dot: string; text: string; card: string; fg: string }

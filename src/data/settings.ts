@@ -20,5 +20,13 @@ export const SEED_USERS: StaffUser[] = [
 ];
 
 export const SEED_BLACKLIST: BlacklistEntry[] = [
-  { id: "b-1", name: "Cliente Hab. 207 (oct-2025)", reason: "Daños no pagados en la habitación." },
+  { id: "b-1", name: "Cliente Hab. 14 (oct-2025)", reason: "Daños no pagados en la habitación." },
+  // Con RUT: al escanear la cédula en un check-in, el sistema alerta solo.
+  // Coincide con una identidad del escáner de ejemplo para poder demostrarlo.
+  {
+    id: "b-2",
+    name: "Andrés Fuenzalida",
+    rut: "14.220.873-K",
+    reason: "Comportamiento agresivo con el personal (mar-2026).",
+  },
 ];

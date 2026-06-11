@@ -2,11 +2,11 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { ImagePlaceholder } from "@/components/ui/ImagePlaceholder";
 import { formatCLP } from "@/lib/format";
-import { fromPrice } from "@/lib/pricing";
+import { fromPrice, isBlackLine } from "@/lib/pricing";
 import type { Category } from "@/types";
 
 export function CategoryCard({ category }: { category: Category }) {
-  const isBlack = category.id === "black";
+  const isBlack = isBlackLine(category.id);
 
   return (
     <Link href={`/reservar?categoria=${category.id}`} className="group relative block">

@@ -3,7 +3,8 @@ import type { PaymentMethod, Transaction } from "@/types";
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: "Efectivo",
-  card: "Tarjeta",
+  debit: "Tarjeta débito",
+  credit: "Tarjeta crédito",
   transfer: "Transferencia",
 };
 

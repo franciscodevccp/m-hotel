@@ -5,7 +5,7 @@ const SERVICES = [
   },
   {
     title: "Jacuzzi privado",
-    desc: "Disponible en las categorías Vip, Premium y BLACK, pensado para dos.",
+    desc: "Disponible en toda la línea Jacuzzi: VIP, Premium y Black, pensado para dos.",
   },
   {
     title: "Estacionamiento privado",

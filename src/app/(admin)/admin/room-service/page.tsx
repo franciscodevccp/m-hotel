@@ -4,8 +4,9 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { ImagePlaceholder } from "@/components/ui/ImagePlaceholder";
 import { Select } from "@/components/ui/Select";
-import { formatCLP, formatTime } from "@/lib/format";
+import { formatCLP, formatDateTime, formatTime } from "@/lib/format";
 import { makeId } from "@/lib/id";
+import { comandaHtml, printTicket, type TicketLine } from "@/lib/printTicket";
 import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -79,6 +80,7 @@ export default function RoomServicePage() {
   const nameById = new Map(products.map((p) => [p.id, p.name]));
 
   const [posOpen, setPosOpen] = useState(false);
+  const [printMsg, setPrintMsg] = useState<string | null>(null);
 
   const list = [...roomService].sort((a, b) => {
     if (a.status !== b.status) return STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
@@ -90,6 +92,62 @@ export default function RoomServicePage() {
     return rooms.find((r) => r.id === id)?.number ?? id;
   }
 
+  const POPUP_BLOCKED =
+    "El navegador bloqueó la ventana de impresión. Permite ventanas emergentes para este sitio y vuelve a intentarlo.";
+
+  function orderLines(o: RoomServiceOrder): TicketLine[] {
+    return o.items.map((it) => {
+      const p = products.find((x) => x.id === it.productId);
+      const price = p?.price ?? 0;
+      return {
+        qty: it.quantity,
+        name: p?.name ?? it.productId,
+        amount: price > 0 ? price * it.quantity : null,
+      };
+    });
+  }
+
+  /** Imprime la comanda del pedido en la térmica (vía diálogo del sistema). */
+  function printOrder(o: RoomServiceOrder) {
+    const ok = printTicket(
+      comandaHtml({
+        room: o.roomId ? `Habitación ${roomNumber(o.roomId)}` : "Pedido online",
+        at: formatDateTime(new Date(o.createdAt)),
+        user: o.user,
+        lines: orderLines(o),
+        total: o.total,
+        notes: o.notes,
+        footer: "Preparar en cocina. El cobro queda asociado a la habitación.",
+      }),
+      "Comanda room service",
+    );
+    setPrintMsg(ok ? null : POPUP_BLOCKED);
+  }
+
+  /** Ticket de prueba: si sale completo y con corte, la impresora quedó reconocida. */
+  function printTest() {
+    const ok = printTicket(
+      comandaHtml({
+        banner: "PRUEBA DE IMPRESORA",
+        room: "Habitación 12",
+        at: formatDateTime(new Date()),
+        user: userLabel,
+        lines: [
+          { qty: 1, name: "Pizza Pepperoni", amount: 4500 },
+          { qty: 2, name: "Cerveza Royal Guard 355 cc", amount: 6000 },
+          { qty: 1, name: "Porción vaso espumante", amount: 3000 },
+          { qty: 2, name: "Alkas", amount: null },
+        ],
+        total: 13500,
+        notes: "Sin ají en la pizza.",
+        footer:
+          "Si este ticket salió completo, con corte y legible, la impresora térmica quedó reconocida.",
+      }),
+      "Prueba de impresora",
+    );
+    setPrintMsg(ok ? null : POPUP_BLOCKED);
+  }
+
   return (
     <div className="mx-auto max-w-5xl">
       <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
@@ -97,14 +155,23 @@ export default function RoomServicePage() {
           <span className="kicker text-gold">Operación</span>
           <h1 className="mt-3 font-display text-3xl text-cream sm:text-4xl">Room service</h1>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
-            Pedidos a la habitación. Al entregarlos baja el stock de cada producto y el total entra
-            al corte del turno.
+            Pedidos a la habitación. Al tomarlos sale la comanda por la impresora térmica para
+            la cocina; al entregarlos baja el stock y el total entra al corte del turno.
           </p>
         </div>
-        <Button onClick={() => setPosOpen(true)} className="shrink-0">
-          Nuevo pedido
-        </Button>
+        <div className="flex shrink-0 gap-3">
+          <Button variant="secondary" onClick={printTest}>
+            Probar impresora
+          </Button>
+          <Button onClick={() => setPosOpen(true)}>Nuevo pedido</Button>
+        </div>
       </div>
+
+      {printMsg && (
+        <div className="mb-5 border border-busy/50 bg-busy/10 px-4 py-3">
+          <p className="text-sm text-busy">{printMsg}</p>
+        </div>
+      )}
 
       <div className="mb-6 flex gap-3">
         <div className="border border-line bg-surface/40 px-5 py-4">
@@ -153,24 +220,33 @@ export default function RoomServicePage() {
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   <span className="tnum text-sm text-gold">{formatCLP(o.total)}</span>
-                  {o.status === "preparando" && (
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => cancelRoomServiceOrder(o.id)}
-                        className="text-xs uppercase tracking-[0.14em] text-dim transition-colors hover:text-busy"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deliverRoomServiceOrder(o.id, userLabel, actor)}
-                        className="border border-line px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-muted transition-colors hover:border-gold/70 hover:text-gold"
-                      >
-                        Entregar
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => printOrder(o)}
+                      className="text-xs uppercase tracking-[0.14em] text-dim transition-colors hover:text-gold"
+                    >
+                      Comanda
+                    </button>
+                    {o.status === "preparando" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => cancelRoomServiceOrder(o.id)}
+                          className="text-xs uppercase tracking-[0.14em] text-dim transition-colors hover:text-busy"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deliverRoomServiceOrder(o.id, userLabel, actor)}
+                          className="border border-line px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-muted transition-colors hover:border-gold/70 hover:text-gold"
+                        >
+                          Entregar
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </li>
             ))}
@@ -196,6 +272,8 @@ export default function RoomServicePage() {
             };
             addRoomServiceOrder(order);
             setPosOpen(false);
+            // La comanda sale sola al tomar el pedido (flujo del cliente).
+            printOrder(order);
           }}
         />
       )}

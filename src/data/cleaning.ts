@@ -1,7 +1,67 @@
-import type { CleaningLogEntry } from "@/types";
+import { seedProductId } from "@/data/products";
+import { hasJacuzzi } from "@/lib/pricing";
+import type { CategoryId, CleaningLogEntry } from "@/types";
 
 /** Personal de aseo (mucamas) de la demo. */
 export const CLEANING_STAFF = ["Rosa Muñoz", "Marta Pino", "Carla Soto", "Lucía Vera"];
+
+// ------------------------------------------------------------------ Checklist
+
+const CHECKLIST_BASE = [
+  "Cama y ropa de cama",
+  "Baño y ducha",
+  "Pisos",
+  "Basureros",
+  "Espejos",
+  "Reposición de amenities",
+  "Aromatización",
+  "Revisión de daños o faltantes",
+];
+
+/** Tareas obligatorias del aseo; el jacuzzi se agrega solo donde corresponde. */
+export function cleaningChecklistFor(categoryId: CategoryId): string[] {
+  if (!hasJacuzzi(categoryId)) return CHECKLIST_BASE;
+  const list = [...CHECKLIST_BASE];
+  list.splice(2, 0, "Jacuzzi: vaciado y sanitizado");
+  return list;
+}
+
+// ------------------------------------------------------------------ Kit de insumos
+
+export interface CleaningKitItem {
+  productId: string;
+  label: string;
+  /** Consumo estimado por aseo, en unidades del inventario (admite fracción de bidón). */
+  quantity: number;
+}
+
+function kitItem(name: string, label: string, quantity: number): CleaningKitItem {
+  return { productId: seedProductId(name), label, quantity };
+}
+
+// Medición predefinida por administración: cuánto insumo consume cada aseo.
+// Configurable por tipo de habitación (la línea Jacuzzi consume más).
+const KIT_BASE: CleaningKitItem[] = [
+  kitItem("Limpia piso 5 L", "Limpia piso", 0.1),
+  kitItem("Cloro gel 5 L", "Cloro gel", 0.1),
+  kitItem("Desinfectante Anti Bac 220 cc elimina olores", "Desinfectante", 0.2),
+  kitItem("Glade desodorante ambiental spray 360 ml", "Desodorante ambiental", 0.1),
+  kitItem("Limpia vidrios 5 L", "Limpia vidrios", 0.1),
+  kitItem("Papel higiénico", "Papel higiénico", 1),
+  kitItem("Papel Nova Ovella 100 m", "Toalla de papel", 0.2),
+];
+
+const KIT_JACUZZI: CleaningKitItem[] = [
+  kitItem("Cloro multiuso 5 L", "Cloro multiuso (jacuzzi)", 0.2),
+  kitItem("Crema limpiadora 700 g", "Crema limpiadora", 0.2),
+];
+
+/** Insumos que descuenta cada limpieza según la categoría de la pieza. */
+export function cleaningKitFor(categoryId: CategoryId): CleaningKitItem[] {
+  return [...KIT_BASE, ...(hasJacuzzi(categoryId) ? KIT_JACUZZI : [])].filter(
+    (i) => i.productId,
+  );
+}
 
 /**
  * 30 días de limpiezas (2026-05-11 → 2026-06-09), determinístico (corre en
@@ -12,9 +72,9 @@ export const CLEANING_STAFF = ["Rosa Muñoz", "Marta Pino", "Carla Soto", "Lucí
 function genCleaningLog(): CleaningLogEntry[] {
   const staff = CLEANING_STAFF;
   const roomIds = [
-    "101", "102", "103", "104", "105", "106", "108",
-    "201", "202", "203", "204", "205", "206",
-    "301", "302", "303", "304", "401", "402",
+    "1", "2", "3", "4", "5", "6", "7", "8",
+    "10", "11", "12", "13", "14",
+    "15", "16", "17", "18", "19", "20", "21",
   ];
   const entries: CleaningLogEntry[] = [];
   let n = 0;

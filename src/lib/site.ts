@@ -12,7 +12,7 @@ export const SITE = {
   phone: "+56 33 251 0695",
   rating: 4.3,
   reviews: 198,
-  rooms: 20,
+  rooms: 21,
   // Enlace directo a la ficha del lugar en Google Maps: muestra la dirección exacta
   // sin pedir la ubicación del usuario (no son indicaciones, es el lugar).
   mapsUrl:

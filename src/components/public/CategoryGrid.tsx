@@ -8,7 +8,7 @@ import { useAppStore } from "@/lib/store";
 export function CategoryGrid() {
   const { categories } = useAppStore();
   return (
-    <div className="mt-14 grid grid-cols-1 gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="mt-14 grid grid-cols-1 gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-3">
       {categories.map((category, i) => (
         <Reveal key={category.id} delay={i * 0.08}>
           <CategoryCard category={category} />

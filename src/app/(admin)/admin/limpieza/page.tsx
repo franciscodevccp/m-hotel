@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CleaningReportButton, fmtDuration } from "@/components/admin/CleaningReportButton";
 import { Select } from "@/components/ui/Select";
+import { cleaningKitFor } from "@/data/cleaning";
 import { formatDate, formatTime } from "@/lib/format";
 import { getCategory } from "@/lib/pricing";
 import { useSession } from "@/lib/session";
@@ -53,6 +54,24 @@ export default function LimpiezaPage() {
   const withMin = history.filter((e) => e.minutes != null);
   const totalMin = withMin.reduce((s, e) => s + (e.minutes ?? 0), 0);
   const avgMin = withMin.length > 0 ? Math.round(totalMin / withMin.length) : 0;
+
+  // Consumo de insumos estimado: cada limpieza del historial aporta el kit de
+  // su categoría. Respeta el filtro por empleada (consumo por camarera).
+  const consumption = useMemo(() => {
+    const acc = new Map<string, { label: string; qty: number }>();
+    for (const e of history) {
+      const room = rooms.find((r) => r.id === e.roomId);
+      if (!room) continue;
+      for (const k of cleaningKitFor(room.categoryId)) {
+        const cur = acc.get(k.productId) ?? { label: k.label, qty: 0 };
+        cur.qty += k.quantity;
+        acc.set(k.productId, cur);
+      }
+    }
+    return [...acc.values()]
+      .map((c) => ({ ...c, qty: Math.round(c.qty * 10) / 10 }))
+      .sort((a, b) => b.qty - a.qty);
+  }, [history, rooms]);
   const roomNumber = (id: string) => rooms.find((r) => r.id === id)?.number ?? id;
   // El historial de 30 días supera las 200 entradas: se pagina como el resto.
   const PAGE_SIZE = 15;
@@ -221,6 +240,43 @@ export default function LimpiezaPage() {
               </button>
             </div>
           )}
+
+          {/* Consumo de insumos de aseo */}
+          <div className="mt-12">
+            <h2 className="font-display text-2xl text-cream">Consumo de insumos de aseo</h2>
+            <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted">
+              Estimado según la medición por categoría: cada limpieza descuenta su kit del
+              inventario. El filtro de empleada también aplica aquí.
+            </p>
+            <div className="mt-4 overflow-hidden border border-line bg-surface/40">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-line text-dim">
+                    <th className="kicker px-5 py-3 font-normal">Insumo</th>
+                    <th className="kicker px-5 py-3 text-right font-normal">
+                      Unidades (30 días)
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {consumption.map((c) => (
+                    <tr key={c.label} className="border-b border-line last:border-b-0">
+                      <td className="px-5 py-3 text-cream">{c.label}</td>
+                      <td className="tnum px-5 py-3 text-right text-muted">
+                        {Number.isInteger(c.qty)
+                          ? c.qty
+                          : c.qty.toFixed(1).replace(".", ",")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs leading-relaxed text-dim">
+              Las cantidades por aseo son configurables por tipo de habitación (la línea
+              Jacuzzi consume más). Fracciones = parte de un bidón o envase.
+            </p>
+          </div>
         </section>
       )}
     </div>

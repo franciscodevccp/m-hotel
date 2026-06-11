@@ -9,7 +9,7 @@ import { MoneyInput } from "@/components/ui/MoneyInput";
 import { Select } from "@/components/ui/Select";
 import { formatCLP } from "@/lib/format";
 import { makeId } from "@/lib/id";
-import { DURATIONS } from "@/lib/pricing";
+import { DURATIONS, isBlackLine } from "@/lib/pricing";
 import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,10 @@ function PriceColumn({ label, category, dayType }: { label: string; category: Ca
           <dt className="kicker text-dim">Hora adicional</dt>
           <dd className="tnum text-sm text-gold">{formatCLP(category.pricing.extraHour[dayType])}</dd>
         </div>
+        <div className="flex items-baseline justify-between">
+          <dt className="kicker text-dim">Persona adicional</dt>
+          <dd className="tnum text-sm text-gold">{formatCLP(category.pricing.extraPerson[dayType])}</dd>
+        </div>
       </dl>
     </div>
   );
@@ -45,6 +49,7 @@ function cloneCat(c: Category): Category {
       weekday: { ...c.pricing.weekday },
       weekend: { ...c.pricing.weekend },
       extraHour: { ...c.pricing.extraHour },
+      extraPerson: { ...c.pricing.extraPerson },
     },
   };
 }
@@ -116,13 +121,13 @@ export default function PreciosPage() {
       },
     });
   }
-  function setExtra(dayType: DayType, value: number) {
+  function setExtra(kind: "extraHour" | "extraPerson", dayType: DayType, value: number) {
     if (!editCat) return;
     setEditCat({
       ...editCat,
       pricing: {
         ...editCat.pricing,
-        extraHour: { ...editCat.pricing.extraHour, [dayType]: value },
+        [kind]: { ...editCat.pricing[kind], [dayType]: value },
       },
     });
   }
@@ -153,7 +158,7 @@ export default function PreciosPage() {
                 <p className="mt-1 text-sm text-muted">{category.tagline}</p>
               </div>
               <div className="flex shrink-0 items-center gap-4">
-                <Badge tone={category.id === "black" ? "black" : "default"}>{category.area} m²</Badge>
+                <Badge tone={isBlackLine(category.id) ? "black" : "default"}>{category.area} m²</Badge>
                 <button
                   type="button"
                   onClick={() => setEditCat(cloneCat(category))}
@@ -170,6 +175,9 @@ export default function PreciosPage() {
           </div>
         ))}
       </div>
+      <p className="mt-3 text-xs leading-relaxed text-dim">
+        Festivos y vísperas de festivo (desde las 14:00) se cobran con tarifa de fin de semana.
+      </p>
 
       {/* Descuentos */}
       <div className="mt-10 flex items-center justify-between">
@@ -320,13 +328,23 @@ export default function PreciosPage() {
                     </div>
                   ))}
                 </div>
-                <div className="mt-3">
-                  <label className="kicker text-dim">Hora adicional</label>
-                  <MoneyInput
-                    value={editCat.pricing.extraHour[dt]}
-                    onValueChange={(v) => setExtra(dt, v)}
-                    className={fieldClass}
-                  />
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="kicker text-dim">Hora adicional</label>
+                    <MoneyInput
+                      value={editCat.pricing.extraHour[dt]}
+                      onValueChange={(v) => setExtra("extraHour", dt, v)}
+                      className={fieldClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="kicker text-dim">Persona adicional</label>
+                    <MoneyInput
+                      value={editCat.pricing.extraPerson[dt]}
+                      onValueChange={(v) => setExtra("extraPerson", dt, v)}
+                      className={fieldClass}
+                    />
+                  </div>
                 </div>
               </div>
             ))}

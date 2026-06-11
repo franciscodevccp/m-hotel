@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { COURTESY_MENU, openingPackFor, type CourtesyItem } from "@/data/courtesies";
 import { IdScanModal } from "@/components/admin/IdScanModal";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
@@ -9,8 +10,9 @@ import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { SegmentedToggle } from "@/components/ui/SegmentedToggle";
 import { DAY_LABELS, DURATION_LABELS, formatCLP, formatTime } from "@/lib/format";
-import { DURATIONS, getCategory, priceFor } from "@/lib/pricing";
-import { formatRut } from "@/lib/rut";
+import { exampleIdentity } from "@/lib/idScan";
+import { DURATIONS, getCategory, isBlackLine, priceFor } from "@/lib/pricing";
+import { formatRut, normalizeRut } from "@/lib/rut";
 import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -37,30 +39,29 @@ function remainingLabel(occupiedUntil: string | undefined, now: number | null): 
 
 const PAY_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "cash", label: "Efectivo" },
-  { value: "card", label: "Tarjeta" },
+  { value: "debit", label: "Tarjeta débito" },
+  { value: "credit", label: "Tarjeta crédito" },
   { value: "transfer", label: "Transferencia" },
 ];
 
-// Identidades de ejemplo para el escaneo de cédula simulado (determinístico
-// por habitación). El escáner real lee el código de la cédula y entrega solo
-// nombre y RUT — nunca la imagen del documento.
-const SCAN_IDENTITIES: { name: string; rut: string }[] = [
-  { name: "Carolina Mendoza", rut: "16.582.441-7" },
-  { name: "Andrés Fuenzalida", rut: "14.220.873-K" },
-  { name: "Javiera Campos", rut: "18.115.062-3" },
-];
 
-// Cortesías de un toque para la habitación ocupada (sin cobro, con rastro).
-const COURTESY_QUICK: { id: string; label: string }[] = [
-  { id: "p-769284017", label: "Alkas" },
-  { id: "p-7802800535569", label: "Papas Kryzpo" },
-  { id: "p-261220243", label: "Bomba de baño" },
-  { id: "p-760798819006", label: "Vaso de espumante" },
-];
+/** Lista "1× Papel higiénico · 2× Alkas · …" del paquete de ingreso de una categoría. */
+function openingPackLabel(items: CourtesyItem[]): string {
+  return items.map((c) => `${c.quantity}× ${c.label}`).join(" · ");
+}
 
 export function RoomBoard() {
-  const { rooms, setRoomStatus, checkIn, checkOut, moveRoom, extendStay, logCourtesy } =
-    useAppStore();
+  const {
+    rooms,
+    blacklist,
+    charges,
+    setRoomStatus,
+    checkIn,
+    checkOut,
+    moveRoom,
+    extendStay,
+    logCourtesy,
+  } = useAppStore();
   const { user, readOnly } = useSession();
   const actor = user ? { name: user.name, role: user.role } : undefined;
   const [courtesyMsg, setCourtesyMsg] = useState<string | null>(null);
@@ -87,6 +88,23 @@ export function RoomBoard() {
 
   const current = selectedId ? (rooms.find((r) => r.id === selectedId) ?? null) : null;
   const userLabel = user ? `${user.roleLabel} · ${user.name}` : undefined;
+  // Con la pieza ocupada, el modal crece y las cortesías quedan a la vista al costado.
+  const courtesySidebar = Boolean(current && current.status === "occupied" && !readOnly);
+
+  // Consulta automática contra la lista negra al escanear o escribir el RUT.
+  const blMatch =
+    guestRut.replace(/[^0-9kK]/g, "").length >= 7
+      ? blacklist.find((b) => b.rut && normalizeRut(b.rut) === normalizeRut(guestRut))
+      : undefined;
+
+  // Cobro en pieza de la habitación abierta: lo pendiente lo cobra la camarera.
+  const currentPending = current
+    ? charges.filter((c) => c.roomId === current.id && c.status === "pendiente")
+    : [];
+  const currentPendingSum = currentPending.reduce((s, c) => s + c.amount, 0);
+  const paidLabel = current?.stay?.paymentMethod
+    ? PAY_METHODS.find((m) => m.value === current.stay?.paymentMethod)?.label
+    : undefined;
 
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -110,14 +128,14 @@ export function RoomBoard() {
     setCourtesyMsg(null);
   }
 
-  function quickCourtesy(roomId: string, productId: string, label: string) {
-    logCourtesy(roomId, productId, 1, actor);
-    setCourtesyMsg(`Registrada: 1× ${label}`);
+  function quickCourtesy(roomId: string, item: CourtesyItem) {
+    logCourtesy(roomId, item.productId, item.quantity, actor);
+    setCourtesyMsg(`Registrada: ${item.quantity}× ${item.label}`);
   }
 
   /** Respaldo del lector: rellena con una identidad de ejemplo (demo sin carnet). */
   function fillExampleId(roomNumber: number) {
-    const identity = SCAN_IDENTITIES[roomNumber % SCAN_IDENTITIES.length];
+    const identity = exampleIdentity(roomNumber);
     setGuestName(identity.name);
     setGuestRut(identity.rut);
     setScanOpen(false);
@@ -167,15 +185,17 @@ export function RoomBoard() {
           title={`Habitación ${current.number}`}
           subtitle={getCategory(current.categoryId).name}
           onClose={close}
+          wide={view === "main" && courtesySidebar}
         >
           {/* ---- Vista principal ---- */}
           {view === "main" && (
+            <div className={cn(courtesySidebar && "sm:grid sm:grid-cols-[1fr_280px] sm:gap-7")}>
             <div className="space-y-5">
               {/* Foto de referencia de la pieza (pendiente de producción) */}
               <ImagePlaceholder
                 ratio="landscape"
                 label="Fotografía de la habitación · próximamente"
-                accent={current.categoryId === "black"}
+                accent={isBlackLine(current.categoryId)}
                 className="max-h-44 w-full"
               />
 
@@ -223,6 +243,16 @@ export function RoomBoard() {
                       )}
                     </dd>
                   </div>
+                  <div className="flex items-baseline justify-between gap-6">
+                    <dt className="kicker text-dim">Cobro en pieza</dt>
+                    <dd className="tnum text-sm">
+                      {currentPendingSum > 0 ? (
+                        <span className="text-busy">Pendiente · {formatCLP(currentPendingSum)}</span>
+                      ) : (
+                        <span className="text-ok">Pagada{paidLabel ? ` · ${paidLabel}` : ""}</span>
+                      )}
+                    </dd>
+                  </div>
                 </dl>
               )}
 
@@ -257,26 +287,6 @@ export function RoomBoard() {
                     >
                       +3 horas
                     </button>
-                  </div>
-
-                  {/* Cortesías de un toque: sin cobro, baja stock con rastro */}
-                  <div className="border-t border-line pt-3">
-                    <p className="kicker text-dim">Cortesías · un toque</p>
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      {COURTESY_QUICK.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => quickCourtesy(current.id, c.id, c.label)}
-                          className="border border-line px-3 py-2.5 text-sm text-muted transition-colors hover:border-gold/70 hover:text-gold"
-                        >
-                          {c.label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className={cn("mt-2 min-h-4 text-xs", courtesyMsg ? "text-ok" : "text-dim")}>
-                      {courtesyMsg ?? "Queda registrada al toque, sin cobro."}
-                    </p>
                   </div>
                 </div>
               )}
@@ -313,6 +323,37 @@ export function RoomBoard() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Cortesías de un toque: todo el menú a la vista, sin cobro y con rastro */}
+            {courtesySidebar && (
+              <aside className="mt-6 border-t border-line pt-5 sm:mt-0 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
+                <p className="kicker text-gold">Cortesías · un toque</p>
+                <p className={cn("mt-2 min-h-4 text-xs", courtesyMsg ? "text-ok" : "text-dim")}>
+                  {courtesyMsg ?? "Quedan registradas al toque, sin cobro."}
+                </p>
+                <div className="mt-3 space-y-4">
+                  {COURTESY_MENU.map((group) => (
+                    <div key={group.label}>
+                      <p className="kicker text-dim">{group.label}</p>
+                      <div className="mt-2 grid grid-cols-2 gap-1.5">
+                        {group.items.map((item) => (
+                          <button
+                            key={item.productId}
+                            type="button"
+                            onClick={() => quickCourtesy(current.id, item)}
+                            className="border border-line px-2.5 py-2 text-left text-xs text-muted transition-colors hover:border-gold/70 hover:text-gold"
+                          >
+                            {item.label}
+                            {item.quantity > 1 ? ` ×${item.quantity}` : ""}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </aside>
+            )}
             </div>
           )}
 
@@ -380,9 +421,19 @@ export function RoomBoard() {
                   El escáner lee el código de la cédula y completa nombre y RUT en un paso. No
                   se almacenan imágenes del documento.
                 </p>
+                {blMatch && (
+                  <div className="mt-3 border border-busy/50 bg-busy/10 px-4 py-3" role="alert">
+                    <p className="text-sm font-medium text-busy">Cliente en lista negra</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted">
+                      {blMatch.name} · {blMatch.reason} Confirma con jefatura antes de
+                      continuar con el ingreso.
+                    </p>
+                  </div>
+                )}
                 <p className="mt-2 text-xs leading-relaxed text-dim">
-                  Al confirmar se registran solas las cortesías de apertura: 2× Alkas, 1× Papas
-                  Kryzpo y 1× Bomba de baño.
+                  Al confirmar se descuenta solo el paquete de ingreso de la categoría (
+                  {openingPackLabel(openingPackFor(current.categoryId))}) y se genera el ticket
+                  de cobro: la camarera cobra el bloque en la pieza.
                 </p>
               </div>
               <div className="flex gap-3">
@@ -407,49 +458,66 @@ export function RoomBoard() {
           {/* ---- Check-out ---- */}
           {view === "checkout" && (
             <div className="space-y-5">
-              <div className="flex items-baseline justify-between border-b border-line pb-4">
-                <span className="kicker text-dim">Total a cobrar</span>
-                <span className="tnum font-display text-2xl text-gold">
-                  {formatCLP(current.stay?.total ?? 0)}
-                </span>
-              </div>
-              <div>
-                <span className="kicker text-dim">Cobro</span>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {PAY_METHODS.map((m) => (
-                    <button
-                      key={m.value}
-                      type="button"
-                      onClick={() => setPayMethod(m.value)}
-                      className={cn(
-                        "border px-3 py-2.5 text-sm transition-colors",
-                        payMethod === m.value
-                          ? "border-gold/70 text-gold"
-                          : "border-line text-muted hover:border-line-strong hover:text-cream",
-                      )}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setPayMethod("none")}
-                    className={cn(
-                      "border px-3 py-2.5 text-sm transition-colors",
-                      payMethod === "none"
-                        ? "border-gold/70 text-gold"
-                        : "border-line text-muted hover:border-line-strong hover:text-cream",
-                    )}
-                  >
-                    Sin cobro
-                  </button>
+              {currentPendingSum > 0 ? (
+                <>
+                  <div className="flex items-baseline justify-between border-b border-line pb-4">
+                    <span className="kicker text-dim">Saldo pendiente</span>
+                    <span className="tnum font-display text-2xl text-gold">
+                      {formatCLP(currentPendingSum)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="kicker text-dim">Cobro</span>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {PAY_METHODS.map((m) => (
+                        <button
+                          key={m.value}
+                          type="button"
+                          onClick={() => setPayMethod(m.value)}
+                          className={cn(
+                            "border px-3 py-2.5 text-sm transition-colors",
+                            payMethod === m.value
+                              ? "border-gold/70 text-gold"
+                              : "border-line text-muted hover:border-line-strong hover:text-cream",
+                          )}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setPayMethod("none")}
+                        className={cn(
+                          "border px-3 py-2.5 text-sm transition-colors",
+                          payMethod === "none"
+                            ? "border-gold/70 text-gold"
+                            : "border-line text-muted hover:border-line-strong hover:text-cream",
+                        )}
+                      >
+                        Sin cobro
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-xs leading-relaxed text-dim">
+                    {payMethod === "none"
+                      ? "La habitación quedará en limpieza sin registrar el saldo."
+                      : "El saldo entra al corte del turno y la habitación pasa a limpieza."}
+                  </p>
+                </>
+              ) : (
+                <div className="border-b border-line pb-4">
+                  <div className="flex items-baseline justify-between">
+                    <span className="kicker text-dim">Estancia</span>
+                    <span className="text-sm text-ok">
+                      Pagada en la pieza{paidLabel ? ` · ${paidLabel}` : ""}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-xs leading-relaxed text-dim">
+                    Sin saldo pendiente: el bloque se cobró al inicio. La habitación pasa a
+                    limpieza.
+                  </p>
                 </div>
-              </div>
-              <p className="text-xs leading-relaxed text-dim">
-                {payMethod === "none"
-                  ? "La habitación quedará en limpieza sin registrar pago."
-                  : "El cobro entra al corte del turno y la habitación pasa a limpieza."}
-              </p>
+              )}
               <div className="flex gap-3">
                 <Button variant="ghost" onClick={() => setView("main")}>
                   Volver
@@ -459,7 +527,7 @@ export function RoomBoard() {
                   onClick={() => {
                     checkOut(
                       current.id,
-                      payMethod === "none" ? undefined : payMethod,
+                      currentPendingSum > 0 && payMethod !== "none" ? payMethod : undefined,
                       userLabel,
                       actor,
                     );

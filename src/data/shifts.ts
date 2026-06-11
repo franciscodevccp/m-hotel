@@ -9,16 +9,18 @@ export const CURRENT_SHIFT_ID = "s-1477";
 // Pagos registrados en el turno en curso. La suma alimenta el detalle de "Pagos
 // del turno"; los totales del corte se llevan en las líneas cash/card del turno.
 export const SEED_TRANSACTIONS: Transaction[] = [
-  { id: "t-501", roomId: "102", method: "cash", amount: 50000, at: "2026-06-04T22:20:00", user: SHIFT_USER },
-  { id: "t-502", roomId: "105", method: "card", amount: 50000, at: "2026-06-04T22:48:00", user: SHIFT_USER },
-  { id: "t-503", roomId: "108", method: "cash", amount: 35000, at: "2026-06-04T23:05:00", user: SHIFT_USER },
-  { id: "t-504", roomId: "201", method: "transfer", amount: 75000, at: "2026-06-04T23:30:00", user: SHIFT_USER },
-  { id: "t-505", roomId: "203", method: "cash", amount: 45000, at: "2026-06-05T00:10:00", user: SHIFT_USER },
-  { id: "t-506", roomId: "304", method: "card", amount: 45000, at: "2026-06-05T00:42:00", user: SHIFT_USER },
+  { id: "t-501", roomId: "2", method: "cash", amount: 50000, at: "2026-06-04T22:20:00", user: SHIFT_USER },
+  { id: "t-502", roomId: "7", method: "debit", amount: 50000, at: "2026-06-04T22:48:00", user: SHIFT_USER },
+  { id: "t-503", roomId: "19", method: "cash", amount: 40000, at: "2026-06-04T23:05:00", user: SHIFT_USER },
+  { id: "t-504", roomId: "4", method: "transfer", amount: 75000, at: "2026-06-04T23:30:00", user: SHIFT_USER },
+  { id: "t-505", roomId: "5", method: "cash", amount: 45000, at: "2026-06-05T00:10:00", user: SHIFT_USER },
+  { id: "t-506", roomId: "12", method: "credit", amount: 90000, at: "2026-06-05T00:42:00", user: SHIFT_USER },
 ];
 
-// Turno abierto sembrado con los números del corte real del cliente (folio 1477):
-// el descuadre fuerte está en tarjeta (−$85.000), el dolor que cierra el trato.
+// Turno abierto sembrado con los números del corte real del cliente (folio 1477).
+// El total tarjetas/transferencia del corte original (416.000 real / 501.000
+// deber) se reparte por medio; el descuadre fuerte sigue en tarjetas (−$85.000),
+// el dolor que cierra el trato.
 export const SEED_SHIFT: Shift = {
   id: CURRENT_SHIFT_ID,
   folio: 1477,
@@ -26,7 +28,9 @@ export const SEED_SHIFT: Shift = {
   openedAt: "2026-06-04T22:00:00",
   openingCash: 15000,
   cash: { real: 419000, expected: 417000 },
-  card: { real: 416000, expected: 501000 },
+  debit: { real: 226000, expected: 281000 },
+  credit: { real: 130000, expected: 160000 },
+  transfer: { real: 60000, expected: 60000 },
   expenses: { real: 0, expected: 0 },
   tipsCash: 19500,
   tipsCard: 27000,

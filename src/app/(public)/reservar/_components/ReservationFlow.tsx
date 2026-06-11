@@ -17,7 +17,7 @@ import {
   hhmmTo12h,
 } from "@/lib/format";
 import { makeId } from "@/lib/id";
-import { DURATIONS, extraHourFor, fromPrice, priceFor } from "@/lib/pricing";
+import { DURATIONS, extraHourFor, extraPersonFor, fromPrice, isBlackLine, priceFor } from "@/lib/pricing";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { CategoryId, DayType, Duration, Reservation } from "@/types";
@@ -217,7 +217,7 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
                     <div>
                       <div className="flex items-center gap-3">
                         <h3 className="font-display text-xl text-cream">{c.name}</h3>
-                        <Badge tone={c.id === "black" ? "black" : "default"}>{c.area} m²</Badge>
+                        <Badge tone={isBlackLine(c.id) ? "black" : "default"}>{c.area} m²</Badge>
                       </div>
                       <p className="mt-1 text-sm text-muted">{c.tagline}</p>
                       <p className={cn("mt-2 text-xs", soldOut ? "text-busy" : "text-ok")}>
@@ -275,7 +275,8 @@ export function ReservationFlow({ initialCategoryId }: { initialCategoryId: Cate
                 </div>
                 {category && (
                   <p className="mt-3 text-xs text-dim">
-                    Hora adicional: {formatCLP(extraHourFor(category, dayType))}. Se coordina en
+                    Hora adicional: {formatCLP(extraHourFor(category, dayType))} · Persona
+                    adicional: {formatCLP(extraPersonFor(category, dayType))}. Se coordinan en
                     recepción.
                   </p>
                 )}

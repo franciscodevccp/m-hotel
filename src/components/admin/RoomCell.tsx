@@ -21,10 +21,12 @@ const ENDING_SOON_MIN = 30;
 
 // Distintivo de categoría: el recepcionista no memoriza qué pieza es qué.
 const CATEGORY_BADGE: Record<CategoryId, string> = {
-  standard: "border-line-strong bg-surface/70 text-muted",
-  "vip-jacuzzi": "border-gold/60 bg-gold/10 text-gold",
+  "standard-vip": "border-line-strong bg-surface/70 text-muted",
+  // Fondo negro fijo: el texto va fijo también (text-cream se invierte en el tema claro).
+  "standard-black": "border-gold/40 bg-[#181410] text-[#e7e0d0]",
+  "jacuzzi-vip": "border-gold/60 bg-gold/10 text-gold",
   "jacuzzi-premium": "border-wine/60 bg-wine/10 text-wine-soft",
-  black: "border-gold/70 bg-[#181410] text-gold",
+  "jacuzzi-black": "border-gold/70 bg-[#181410] text-gold",
 };
 
 interface RoomCellProps {

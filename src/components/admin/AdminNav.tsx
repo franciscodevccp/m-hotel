@@ -34,6 +34,7 @@ const MOTEL_GROUPS: NavGroup[] = [
       { href: "/admin", label: "Dashboard", roles: STAFF },
       { href: "/admin/habitaciones", label: "Habitaciones", roles: STAFF },
       { href: "/admin/reservas", label: "Reservas", roles: STAFF },
+      { href: "/admin/huespedes", label: "Huéspedes", roles: STAFF },
       { href: "/admin/caja", label: "Caja y turnos", roles: BOTH },
       { href: "/admin/room-service", label: "Room service", roles: STAFF },
       { href: "/admin/limpieza", label: "Limpieza", roles: STAFF },

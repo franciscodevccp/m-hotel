@@ -7,7 +7,7 @@ import {
 } from "@/lib/cash";
 import { formatCLP, formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { CashLine, Shift } from "@/types";
+import type { CashLine, Shift, Transaction } from "@/types";
 
 /** Color de una diferencia: rojo si falta, dorado si sobra, ok si cuadra. */
 function diffClass(diff: number): string {
@@ -30,10 +30,22 @@ function LineRow({ label, line }: { label: string; line: CashLine }) {
   );
 }
 
-export function ShiftSummary({ shift }: { shift: Shift }) {
+export function ShiftSummary({
+  shift,
+  transactions,
+}: {
+  shift: Shift;
+  /** Pagos del turno: habilita habitaciones vendidas y ticket promedio. */
+  transactions?: Transaction[];
+}) {
   const cDiff = cashDiff(shift);
   const tDiff = cardDiff(shift);
   const descuadre = cDiff !== 0 || tDiff !== 0;
+  const roomsSold = transactions ? new Set(transactions.map((t) => t.roomId)).size : null;
+  const avgTicket =
+    transactions && transactions.length > 0
+      ? Math.round(transactions.reduce((s, t) => s + t.amount, 0) / transactions.length)
+      : null;
 
   return (
     <div className="border border-line bg-surface/40 p-6">
@@ -58,7 +70,9 @@ export function ShiftSummary({ shift }: { shift: Shift }) {
 
       <div className="divide-y divide-line">
         <LineRow label="Efectivo" line={shift.cash} />
-        <LineRow label="Tarjeta y transferencia" line={shift.card} />
+        <LineRow label="Tarjeta débito" line={shift.debit} />
+        <LineRow label="Tarjeta crédito" line={shift.credit} />
+        <LineRow label="Transferencia" line={shift.transfer} />
         <LineRow label="Gastos" line={shift.expenses} />
       </div>
 
@@ -71,6 +85,18 @@ export function ShiftSummary({ shift }: { shift: Shift }) {
           <dt className="kicker text-dim">Ingresos totales</dt>
           <dd className="tnum text-sm text-cream">{formatCLP(ingresosTotales(shift))}</dd>
         </div>
+        {roomsSold != null && (
+          <div className="flex items-baseline justify-between">
+            <dt className="kicker text-dim">Habitaciones vendidas</dt>
+            <dd className="tnum text-sm text-cream">{roomsSold}</dd>
+          </div>
+        )}
+        {avgTicket != null && (
+          <div className="flex items-baseline justify-between">
+            <dt className="kicker text-dim">Ticket promedio</dt>
+            <dd className="tnum text-sm text-cream">{formatCLP(avgTicket)}</dd>
+          </div>
+        )}
         <div className="flex items-baseline justify-between">
           <dt className="kicker text-dim">Propinas (efectivo · tarjeta)</dt>
           <dd className="tnum text-sm text-muted">
@@ -89,8 +115,8 @@ export function ShiftSummary({ shift }: { shift: Shift }) {
           <p className="mt-1 text-xs leading-relaxed text-muted">
             {tDiff !== 0 && (
               <>
-                Tarjeta: {tDiff < 0 ? "faltan" : "sobran"} {formatCLP(Math.abs(tDiff))} respecto a los
-                comprobantes esperados.{" "}
+                Tarjetas y transferencia: {tDiff < 0 ? "faltan" : "sobran"}{" "}
+                {formatCLP(Math.abs(tDiff))} respecto a los comprobantes esperados.{" "}
               </>
             )}
             {cDiff !== 0 && (

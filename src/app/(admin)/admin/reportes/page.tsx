@@ -185,7 +185,7 @@ export default function ReportesPage() {
           )}
         </ChartCard>
 
-        <ChartCard title="Ocupación por estado" hint="Situación actual de las 20 habitaciones">
+        <ChartCard title="Ocupación por estado" hint="Situación actual de las 21 habitaciones">
           <BarChart data={ocupacion} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis dataKey="estado" stroke={AXIS} tickLine={false} axisLine={false} fontSize={11} />

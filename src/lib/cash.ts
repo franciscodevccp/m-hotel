@@ -1,4 +1,4 @@
-import type { InventoryMovement, Product, Shift, ShiftItem } from "@/types";
+import type { CashLine, InventoryMovement, Product, Shift, ShiftItem } from "@/types";
 
 // ShiftItem vive en @/types (lo comparte el snapshot de cortes archivados);
 // se reexporta aquí para los consumidores existentes.
@@ -7,28 +7,33 @@ export type { ShiftItem };
 // Derivados del corte de caja. No se guardan: se calculan desde el turno y los
 // movimientos. Única fuente de verdad para los números que muestra el corte.
 
-/** Diferencia de efectivo: contado − esperado. Positivo = sobra, negativo = falta. */
-export function cashDiff(shift: Shift): number {
-  return shift.cash.real - shift.cash.expected;
+/** Diferencia de una línea del arqueo: real − esperado. Positivo = sobra, negativo = falta. */
+export function lineDiff(line: CashLine): number {
+  return line.real - line.expected;
 }
 
-/** Diferencia de tarjeta (incluye transferencias). Es donde suele estar el descuadre. */
+/** Diferencia de efectivo. */
+export function cashDiff(shift: Shift): number {
+  return lineDiff(shift.cash);
+}
+
+/** Diferencia agregada de los medios electrónicos (débito + crédito + transferencia). */
 export function cardDiff(shift: Shift): number {
-  return shift.card.real - shift.card.expected;
+  return lineDiff(shift.debit) + lineDiff(shift.credit) + lineDiff(shift.transfer);
 }
 
 export function expensesDiff(shift: Shift): number {
-  return shift.expenses.real - shift.expenses.expected;
+  return lineDiff(shift.expenses);
 }
 
-/** Descuadre total del turno: suma de las diferencias de efectivo y tarjeta. */
+/** Descuadre total del turno: suma de las diferencias de todos los medios. */
 export function totalDiff(shift: Shift): number {
   return cashDiff(shift) + cardDiff(shift);
 }
 
-/** Ingresos totales del turno: efectivo + tarjeta realmente registrados. */
+/** Ingresos totales del turno: todos los medios realmente registrados. */
 export function ingresosTotales(shift: Shift): number {
-  return shift.cash.real + shift.card.real;
+  return shift.cash.real + shift.debit.real + shift.credit.real + shift.transfer.real;
 }
 
 /** Utilidad del turno: ingresos − gastos reales. */

@@ -85,7 +85,7 @@ function genHistory(): DailyStat[] {
     const trend = 1 + 0.1 * (i / 89); // crecimiento suave del trimestre
     const weekend = day === 5 || day === 6 || day === 0;
     const ticket = weekend ? 68000 : 52000;
-    const stays = (occupancy / 100) * 20; // 20 habitaciones
+    const stays = (occupancy / 100) * 21; // 21 habitaciones
     const revenueRooms = roundThousands(stays * ticket * trend);
     const productsPct = 0.12 + ((i * 7) % 7) * 0.01; // 12–18 %
     const revenueProducts = roundThousands(revenueRooms * productsPct);
@@ -119,31 +119,32 @@ export interface RoomUsage {
 }
 
 /**
- * Uso por habitación en 90 días. Las Standard rotan más; las BLACK rotan menos
- * pero con mayor ingreso por estancia. La 107 (en mantención) es la menos
+ * Uso por habitación en 90 días. Las Standard rotan más; la línea Black rota
+ * menos pero con mayor ingreso por estancia. La 9 (en mantención) es la menos
  * vendida a propósito: da pie a conversación real en la demo.
  */
 export const ROOM_USAGE_90D: RoomUsage[] = [
-  { roomId: "101", stays: 128, revenue: 4096000 },
-  { roomId: "102", stays: 121, revenue: 3872000 },
-  { roomId: "103", stays: 117, revenue: 3744000 },
-  { roomId: "104", stays: 112, revenue: 3584000 },
-  { roomId: "105", stays: 109, revenue: 3488000 },
-  { roomId: "106", stays: 103, revenue: 3296000 },
-  { roomId: "107", stays: 31, revenue: 992000 },
-  { roomId: "108", stays: 96, revenue: 3072000 },
-  { roomId: "201", stays: 88, revenue: 3960000 },
-  { roomId: "202", stays: 84, revenue: 3780000 },
-  { roomId: "203", stays: 81, revenue: 3645000 },
-  { roomId: "204", stays: 78, revenue: 3510000 },
-  { roomId: "205", stays: 74, revenue: 3330000 },
-  { roomId: "206", stays: 71, revenue: 3195000 },
-  { roomId: "301", stays: 67, revenue: 3484000 },
-  { roomId: "302", stays: 64, revenue: 3328000 },
-  { roomId: "303", stays: 61, revenue: 3172000 },
-  { roomId: "304", stays: 58, revenue: 3016000 },
-  { roomId: "401", stays: 56, revenue: 4200000 },
-  { roomId: "402", stays: 52, revenue: 3900000 },
+  { roomId: "1", stays: 128, revenue: 4096000 },
+  { roomId: "2", stays: 121, revenue: 3872000 },
+  { roomId: "3", stays: 117, revenue: 3744000 },
+  { roomId: "6", stays: 112, revenue: 3584000 },
+  { roomId: "7", stays: 109, revenue: 3488000 },
+  { roomId: "8", stays: 103, revenue: 3296000 },
+  { roomId: "9", stays: 31, revenue: 992000 },
+  { roomId: "4", stays: 88, revenue: 3960000 },
+  { roomId: "5", stays: 84, revenue: 3780000 },
+  { roomId: "10", stays: 81, revenue: 4050000 },
+  { roomId: "11", stays: 78, revenue: 3900000 },
+  { roomId: "12", stays: 74, revenue: 3700000 },
+  { roomId: "13", stays: 67, revenue: 3350000 },
+  { roomId: "14", stays: 64, revenue: 3200000 },
+  { roomId: "15", stays: 61, revenue: 4575000 },
+  { roomId: "16", stays: 58, revenue: 4350000 },
+  { roomId: "17", stays: 56, revenue: 4200000 },
+  { roomId: "18", stays: 52, revenue: 3900000 },
+  { roomId: "19", stays: 71, revenue: 2840000 },
+  { roomId: "20", stays: 68, revenue: 2720000 },
+  { roomId: "21", stays: 66, revenue: 2640000 },
 ];
 
 // ------------------------------------------------------------------ Consumo y costos

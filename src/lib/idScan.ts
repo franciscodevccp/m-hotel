@@ -11,6 +11,22 @@ export interface ScannedId {
   name?: string;
 }
 
+/**
+ * Identidades de ejemplo para el escaneo simulado (demo sin carnet),
+ * determinísticas por número de habitación. La segunda coincide a propósito
+ * con la lista negra sembrada, para poder demostrar la alerta.
+ */
+export const SCAN_IDENTITIES: { name: string; rut: string }[] = [
+  { name: "Carolina Mendoza", rut: "16.582.441-7" },
+  { name: "Andrés Fuenzalida", rut: "14.220.873-K" },
+  { name: "Javiera Campos", rut: "18.115.062-3" },
+];
+
+/** Identidad de ejemplo estable para una habitación. */
+export function exampleIdentity(roomNumber: number): { name: string; rut: string } {
+  return SCAN_IDENTITIES[roomNumber % SCAN_IDENTITIES.length];
+}
+
 function capitalize(word: string): string {
   return word.charAt(0) + word.slice(1).toLowerCase();
 }

@@ -36,10 +36,10 @@ export default function HomePage() {
           <Reveal className="max-w-2xl">
             <span className="kicker text-gold">Categorías</span>
             <h2 className="mt-4 font-display text-4xl leading-tight text-cream sm:text-5xl">
-              Cuatro formas de estar a solas.
+              Cinco formas de estar a solas.
             </h2>
             <p className="mt-4 max-w-lg leading-relaxed text-muted">
-              Desde lo esencial hasta la categoría BLACK. Cada una con su tarifa por bloque de
+              Desde lo esencial hasta la línea Black. Cada una con su tarifa por bloque de
               horas; el tiempo lo eliges al reservar.
             </p>
           </Reveal>

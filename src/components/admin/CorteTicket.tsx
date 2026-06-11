@@ -1,8 +1,8 @@
 import {
   cashDiff,
-  cardDiff,
   expensesDiff,
   ingresosTotales,
+  lineDiff,
   utilidadTurno,
   type ShiftItem,
 } from "@/lib/cash";
@@ -36,7 +36,9 @@ function Section({ title }: { title: string }) {
 /** Réplica visual del corte de caja que imprime el cliente. Layout angosto tipo ticket. */
 export function CorteTicket({ shift, items }: { shift: Shift; items: ShiftItem[] }) {
   const cDiff = cashDiff(shift);
-  const tDiff = cardDiff(shift);
+  const dDiff = lineDiff(shift.debit);
+  const crDiff = lineDiff(shift.credit);
+  const trDiff = lineDiff(shift.transfer);
   const eDiff = expensesDiff(shift);
 
   return (
@@ -56,10 +58,20 @@ export function CorteTicket({ shift, items }: { shift: Shift; items: ShiftItem[]
       <TLine label="Efectivo deber" value={formatCLP(shift.cash.expected)} tone="dim" />
       <TLine label="Diferencia" value={cDiff === 0 ? "—" : formatCLP(cDiff)} tone={cDiff !== 0 ? "alert" : undefined} />
 
-      <Section title="Pagos con tarjeta" />
-      <TLine label="Comprobante real" value={formatCLP(shift.card.real)} />
-      <TLine label="Comprobante deber" value={formatCLP(shift.card.expected)} tone="dim" />
-      <TLine label="Diferencia" value={tDiff === 0 ? "—" : formatCLP(tDiff)} tone={tDiff !== 0 ? "alert" : undefined} />
+      <Section title="Tarjeta débito" />
+      <TLine label="Comprobante real" value={formatCLP(shift.debit.real)} />
+      <TLine label="Comprobante deber" value={formatCLP(shift.debit.expected)} tone="dim" />
+      <TLine label="Diferencia" value={dDiff === 0 ? "—" : formatCLP(dDiff)} tone={dDiff !== 0 ? "alert" : undefined} />
+
+      <Section title="Tarjeta crédito" />
+      <TLine label="Comprobante real" value={formatCLP(shift.credit.real)} />
+      <TLine label="Comprobante deber" value={formatCLP(shift.credit.expected)} tone="dim" />
+      <TLine label="Diferencia" value={crDiff === 0 ? "—" : formatCLP(crDiff)} tone={crDiff !== 0 ? "alert" : undefined} />
+
+      <Section title="Transferencias" />
+      <TLine label="Abonos reales" value={formatCLP(shift.transfer.real)} />
+      <TLine label="Abonos deber" value={formatCLP(shift.transfer.expected)} tone="dim" />
+      <TLine label="Diferencia" value={trDiff === 0 ? "—" : formatCLP(trDiff)} tone={trDiff !== 0 ? "alert" : undefined} />
 
       <Section title="Gastos" />
       <TLine label="Real" value={formatCLP(shift.expenses.real)} />

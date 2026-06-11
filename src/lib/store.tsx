@@ -12,8 +12,10 @@ import { CATEGORIES } from "@/data/categories";
 import { SEED_ANOMALIES } from "@/data/anomalies";
 import { SEED_AUDIT } from "@/data/audit";
 import { SEED_BRANCHES } from "@/data/branches";
-import { SEED_CLEANING_LOG } from "@/data/cleaning";
+import { cleaningKitFor, SEED_CLEANING_LOG } from "@/data/cleaning";
+import { SEED_CHARGES } from "@/data/charges";
 import { SEED_COUPONS } from "@/data/coupons";
+import { openingPackFor } from "@/data/courtesies";
 import { freeMachineName, SEED_LAUNDRY, seedLaundryTimes } from "@/data/laundry";
 import { LINEN_STOCK, SEED_LINEN_INCIDENTS } from "@/data/linens";
 import { SEED_PACKAGES } from "@/data/packages";
@@ -43,6 +45,7 @@ import type {
   BlacklistEntry,
   Branch,
   CashLine,
+  Cuadratura,
   Category,
   ClosedShift,
   CleaningLogEntry,
@@ -65,6 +68,7 @@ import type {
   Purchase,
   Reservation,
   Room,
+  RoomCharge,
   RoomServiceOrder,
   RoomStatus,
   SalesChannel,
@@ -80,7 +84,9 @@ import type {
   Warehouse,
 } from "@/types";
 
-const STORAGE_KEY = "m-motel-state-v13";
+// v16: cobro en pieza (tickets de la camarera), cuadraturas parciales, arqueo
+// con débito/crédito/transferencia, colores operacionales y lista negra con RUT.
+const STORAGE_KEY = "m-motel-state-v16";
 
 /** Suma a ambas líneas del corte: lo registrado por el sistema es lo que debería
  * haber (deber) y, con el turno abierto, se asume que también está (real). La
@@ -91,7 +97,8 @@ function addToLine(line: CashLine, amount: number): CashLine {
 
 const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   cash: "Efectivo",
-  card: "Tarjeta",
+  debit: "Tarjeta débito",
+  credit: "Tarjeta crédito",
   transfer: "Transferencia",
 };
 
@@ -101,16 +108,6 @@ const ROOM_STATUS_LABEL: Record<RoomStatus, string> = {
   cleaning: "Limpieza",
   maintenance: "Mantención",
 };
-
-/**
- * Cortesías de apertura: se registran solas con cada check-in (pedido del
- * cliente: que queden establecidas por abrir la habitación, sin buscarlas).
- */
-const OPENING_COURTESIES: { productId: string; quantity: number; label: string }[] = [
-  { productId: "p-769284017", quantity: 2, label: "Alkas" },
-  { productId: "p-7802800535569", quantity: 1, label: "Papas Kryzpo" },
-  { productId: "p-261220243", quantity: 1, label: "Bomba de baño" },
-];
 
 let auditSeq = 0;
 
@@ -143,6 +140,10 @@ interface AppState {
   shift: Shift;
   /** Cortes cerrados y archivados (el más reciente primero). */
   pastShifts: ClosedShift[];
+  /** Tickets de cobro en pieza (el bloque se paga al inicio de la estadía). */
+  charges: RoomCharge[];
+  /** Cuadraturas parciales del turno en curso. */
+  cuadraturas: Cuadratura[];
   expenses: Expense[];
   products: Product[];
   movements: InventoryMovement[];
@@ -256,6 +257,12 @@ interface AppStore extends AppState {
   logCourtesy: (roomId: string, productId: string, quantity: number, actor?: Actor) => void;
   /** Ampliar estancia: extiende el término y suma la hora adicional al total. */
   extendStay: (roomId: string, extraHours: number, actor?: Actor) => void;
+  /** Cobra un ticket pendiente en la pieza: el pago entra al corte del turno. */
+  payCharge: (chargeId: string, method: PaymentMethod, user?: string, actor?: Actor) => void;
+  /** Registra nombre y RUT del huésped de una pieza ocupada (escaneo de la camarera). */
+  updateStayGuest: (roomId: string, name: string, rut: string, actor?: Actor) => void;
+  /** Cuadratura parcial: arqueo intermedio del turno, sin cerrar la caja. */
+  logCuadratura: (counted: Record<PaymentMethod, number>, user?: string, actor?: Actor) => void;
   addTransaction: (transaction: Transaction, actor?: Actor) => void;
   /** Registra un gasto del turno: entra a la línea de gastos del corte. */
   addExpense: (expense: Expense, actor?: Actor) => void;
@@ -313,7 +320,7 @@ interface AppStore extends AppState {
    * definitivo en lo contado y abre el folio siguiente con la caja inicial dada.
    */
   closeShift: (
-    counted: { cash: number; card: number },
+    counted: Record<PaymentMethod, number>,
     nextOpeningCash: number,
     user?: string,
     actor?: Actor,
@@ -361,6 +368,8 @@ function seedState(): AppState {
     transactions: SEED_TRANSACTIONS,
     shift: SEED_SHIFT,
     pastShifts: [],
+    charges: SEED_CHARGES,
+    cuadraturas: [],
     expenses: SEED_EXPENSES,
     products: SEED_PRODUCTS,
     movements: SEED_MOVEMENTS,
@@ -431,6 +440,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           transactions: parsed.transactions ?? prev.transactions,
           shift: parsed.shift ?? prev.shift,
           pastShifts: parsed.pastShifts ?? prev.pastShifts,
+          charges: parsed.charges ?? prev.charges,
+          cuadraturas: parsed.cuadraturas ?? prev.cuadraturas,
           expenses: parsed.expenses ?? prev.expenses,
           products: parsed.products ?? prev.products,
           movements: parsed.movements ?? prev.movements,
@@ -592,13 +603,26 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const minutes = room.cleaningStartedAt
         ? Math.max(0, Math.round((Date.now() - new Date(room.cleaningStartedAt).getTime()) / 60000))
         : undefined;
+      const now = new Date().toISOString();
       const entry: CleaningLogEntry = {
         id: makeId("cl"),
         roomId,
         by: room.cleaningAssignee,
-        at: new Date().toISOString(),
+        at: now,
         minutes,
       };
+      // El aseo descuenta solo los insumos según la medición de su categoría.
+      const kit = cleaningKitFor(room.categoryId);
+      const kitMovements: InventoryMovement[] = kit.map((k, i) => ({
+        id: `${makeId("m")}-a${i}`,
+        productId: k.productId,
+        type: "ajuste",
+        quantity: -k.quantity,
+        at: now,
+        refId: `aseo-${roomId}`,
+        user: `Insumos de aseo · Hab. ${room.number}`,
+      }));
+      const kitById = new Map(kit.map((k) => [k.productId, k.quantity]));
       return {
         ...prev,
         rooms: prev.rooms.map((r) =>
@@ -612,13 +636,18 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
               }
             : r,
         ),
+        products: prev.products.map((p) => {
+          const qty = kitById.get(p.id);
+          return qty ? { ...p, stock: Math.max(0, Math.round((p.stock - qty) * 10) / 10) } : p;
+        }),
+        movements: [...kitMovements, ...prev.movements],
         cleaningLog: [entry, ...prev.cleaningLog],
         audit: [
           auditEntry(
             "estado",
             "Terminó una limpieza",
             "Limpieza",
-            `Habitación ${room.number}${minutes != null ? ` · ${minutes} min` : ""}`,
+            `Habitación ${room.number}${minutes != null ? ` · ${minutes} min` : ""} · checklist completo · insumos descontados`,
             actor ?? (room.cleaningAssignee ? { name: room.cleaningAssignee, role: "aseo" } : undefined),
           ),
           ...prev.audit,
@@ -823,19 +852,31 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         const total = priceFor(category, dayType, duration);
         const checkInAt = new Date();
         const until = new Date(checkInAt.getTime() + duration * 3600000).toISOString();
-        // Las cortesías de apertura se descargan solas del stock de recepción.
-        const courtesyMovements: InventoryMovement[] = OPENING_COURTESIES.map((c, i) => ({
+        // El paquete de ingreso de la categoría se descarga solo del stock de recepción.
+        const openingPack = openingPackFor(room.categoryId);
+        const courtesyMovements: InventoryMovement[] = openingPack.map((c, i) => ({
           id: `${makeId("m")}-c${i}`,
           productId: c.productId,
           type: "ajuste",
           quantity: -c.quantity,
           at: checkInAt.toISOString(),
           refId: `cortesia-apertura-${roomId}`,
-          user: `Cortesía de apertura · Hab. ${room.number}`,
+          user: `Paquete de ingreso · Hab. ${room.number}`,
         }));
-        const courtesyById = new Map(OPENING_COURTESIES.map((c) => [c.productId, c.quantity]));
+        const courtesyById = new Map(openingPack.map((c) => [c.productId, c.quantity]));
+        // Ticket interno de cobro: la camarera lo cobra en la pieza al inicio.
+        const charge: RoomCharge = {
+          id: makeId("ch"),
+          roomId,
+          concept: `Bloque ${duration} h`,
+          amount: total,
+          courtesies: [],
+          status: "pendiente",
+          createdAt: checkInAt.toISOString(),
+        };
         return {
           ...prev,
+          charges: [charge, ...prev.charges],
           products: prev.products.map((p) => {
             const qty = courtesyById.get(p.id);
             return qty ? { ...p, stock: Math.max(0, p.stock - qty) } : p;
@@ -861,9 +902,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           audit: [
             auditEntry(
               "crear",
-              "Registró cortesías de apertura",
+              "Registró el paquete de ingreso",
               "Cortesías",
-              `Habitación ${room.number} · ${OPENING_COURTESIES.map((c) => `${c.quantity}× ${c.label}`).join(" · ")}`,
+              `Habitación ${room.number} · ${openingPack.map((c) => `${c.quantity}× ${c.label}`).join(" · ")}`,
               actor,
             ),
             auditEntry(
@@ -896,18 +937,149 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           refId: `cortesia-${roomId}`,
           user: `Cortesía · Hab. ${room.number}`,
         };
+        // La cortesía pedida por citófono queda anotada en el ticket de la pieza,
+        // para que quien la prepara sepa qué llevar junto con el cobro.
+        const openCharge = prev.charges.find(
+          (c) => c.roomId === roomId && c.status === "pendiente",
+        );
         return {
           ...prev,
           products: prev.products.map((p) =>
             p.id === productId ? { ...p, stock: Math.max(0, p.stock - quantity) } : p,
           ),
           movements: [movement, ...prev.movements],
+          charges: openCharge
+            ? prev.charges.map((c) =>
+                c.id === openCharge.id
+                  ? { ...c, courtesies: [...c.courtesies, `${quantity}× ${product.name}`] }
+                  : c,
+              )
+            : prev.charges,
           audit: [
             auditEntry(
               "crear",
               "Registró una cortesía",
               "Cortesías",
               `Habitación ${room.number} · ${quantity}× ${product.name}`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
+  const payCharge = useCallback(
+    (chargeId: string, method: PaymentMethod, user?: string, actor?: Actor) => {
+      setState((prev) => {
+        const charge = prev.charges.find((c) => c.id === chargeId);
+        if (!charge || charge.status !== "pendiente") return prev;
+        const room = prev.rooms.find((r) => r.id === charge.roomId);
+        const now = new Date().toISOString();
+        const tx: Transaction = {
+          id: makeId("t"),
+          roomId: charge.roomId,
+          method,
+          amount: charge.amount,
+          at: now,
+          user: user ?? prev.shift.user,
+          branchId: "limache",
+        };
+        return {
+          ...prev,
+          transactions: [tx, ...prev.transactions],
+          shift: { ...prev.shift, [method]: addToLine(prev.shift[method], charge.amount) },
+          charges: prev.charges.map((c) =>
+            c.id === chargeId ? { ...c, status: "pagado", paidAt: now, method, by: user } : c,
+          ),
+          rooms: prev.rooms.map((r) =>
+            r.id === charge.roomId && r.stay
+              ? { ...r, stay: { ...r.stay, paid: true, paymentMethod: method, paidAt: now } }
+              : r,
+          ),
+          audit: [
+            auditEntry(
+              "crear",
+              "Cobró una estancia en la pieza",
+              "Caja",
+              `Habitación ${room?.number ?? charge.roomId} · ${charge.concept} · ${PAYMENT_LABEL[method]} · ${formatCLP(charge.amount)}`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
+  const updateStayGuest = useCallback(
+    (roomId: string, name: string, rut: string, actor?: Actor) => {
+      setState((prev) => {
+        const room = prev.rooms.find((r) => r.id === roomId);
+        if (!room || !room.stay) return prev;
+        return {
+          ...prev,
+          rooms: prev.rooms.map((r) =>
+            r.id === roomId && r.stay
+              ? {
+                  ...r,
+                  stay: {
+                    ...r.stay,
+                    guestName: name.trim() || r.stay.guestName,
+                    guestRut: rut.trim() || r.stay.guestRut,
+                  },
+                }
+              : r,
+          ),
+          audit: [
+            auditEntry(
+              "editar",
+              "Registró al huésped desde la pieza",
+              "Habitaciones",
+              `Habitación ${room.number} · escaneo de cédula`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
+  const logCuadratura = useCallback(
+    (counted: Record<PaymentMethod, number>, user?: string, actor?: Actor) => {
+      setState((prev) => {
+        const entry: Cuadratura = {
+          id: makeId("cq"),
+          at: new Date().toISOString(),
+          user: user ?? prev.shift.user,
+          counted,
+          expected: {
+            cash: prev.shift.cash.expected,
+            debit: prev.shift.debit.expected,
+            credit: prev.shift.credit.expected,
+            transfer: prev.shift.transfer.expected,
+          },
+        };
+        const diff =
+          counted.cash -
+          entry.expected.cash +
+          (counted.debit - entry.expected.debit) +
+          (counted.credit - entry.expected.credit) +
+          (counted.transfer - entry.expected.transfer);
+        return {
+          ...prev,
+          cuadraturas: [entry, ...prev.cuadraturas],
+          audit: [
+            auditEntry(
+              "crear",
+              "Hizo una cuadratura parcial",
+              "Caja",
+              `Folio ${prev.shift.folio} · diferencia ${diff === 0 ? "—" : formatCLP(diff)}`,
               actor,
             ),
             ...prev.audit,
@@ -925,29 +1097,40 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!room) return prev;
       let transactions = prev.transactions;
       let shift = prev.shift;
-      // El check-out puede gatillar un pago en caja, que entra al corte del turno.
-      if (method && room.stay && room.stay.total > 0) {
+      let charges = prev.charges;
+      // El bloque se cobra en la pieza al inicio; al check-out solo se liquida
+      // lo que siga pendiente (p. ej. horas adicionales).
+      const pending = prev.charges.filter((c) => c.roomId === roomId && c.status === "pendiente");
+      const pendingSum = pending.reduce((s, c) => s + c.amount, 0);
+      if (method && pendingSum > 0) {
+        const now = new Date().toISOString();
         const tx: Transaction = {
           id: makeId("t"),
           roomId,
           method,
-          amount: room.stay.total,
-          at: new Date().toISOString(),
+          amount: pendingSum,
+          at: now,
           user: user ?? prev.shift.user,
           branchId: "limache",
         };
-        const line = method === "cash" ? "cash" : "card";
+        // Cada medio de pago acumula en su propia línea del arqueo.
         transactions = [tx, ...transactions];
-        shift = { ...shift, [line]: addToLine(shift[line], tx.amount) };
+        shift = { ...shift, [method]: addToLine(shift[method], tx.amount) };
+        charges = charges.map((c) =>
+          c.roomId === roomId && c.status === "pendiente"
+            ? { ...c, status: "pagado" as const, paidAt: now, method, by: user }
+            : c,
+        );
       }
       const cobro =
-        method && room.stay && room.stay.total > 0
-          ? ` · cobro ${formatCLP(room.stay.total)} ${PAYMENT_LABEL[method].toLowerCase()}`
+        method && pendingSum > 0
+          ? ` · cobro pendiente ${formatCLP(pendingSum)} ${PAYMENT_LABEL[method].toLowerCase()}`
           : "";
       return {
         ...prev,
         transactions,
         shift,
+        charges,
         audit: [
           auditEntry(
             "estado",
@@ -1012,8 +1195,32 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const category = prev.categories.find((c) => c.id === room.categoryId);
       const extra =
         room.stay && category ? extraHourFor(category, room.stay.dayType) * extraHours : 0;
+      // La hora adicional genera (o engorda) un ticket de cobro pendiente.
+      const openCharge = prev.charges.find(
+        (c) => c.roomId === roomId && c.status === "pendiente",
+      );
+      const charges =
+        extra <= 0
+          ? prev.charges
+          : openCharge
+            ? prev.charges.map((c) =>
+                c.id === openCharge.id ? { ...c, amount: c.amount + extra } : c,
+              )
+            : [
+                {
+                  id: makeId("ch"),
+                  roomId,
+                  concept: `Hora adicional ×${extraHours}`,
+                  amount: extra,
+                  courtesies: [],
+                  status: "pendiente" as const,
+                  createdAt: new Date().toISOString(),
+                },
+                ...prev.charges,
+              ];
       return {
         ...prev,
+        charges,
         rooms: prev.rooms.map((r) =>
           r.id === roomId
             ? {
@@ -1039,14 +1246,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const addTransaction = useCallback((transaction: Transaction, actor?: Actor) => {
     setState((prev) => {
-      // Efectivo entra al efectivo del corte; tarjeta y transferencia, a tarjeta.
-      const line = transaction.method === "cash" ? "cash" : "card";
+      // Cada medio de pago acumula en su propia línea del arqueo.
       return {
         ...prev,
         transactions: [transaction, ...prev.transactions],
         shift: {
           ...prev.shift,
-          [line]: addToLine(prev.shift[line], transaction.amount),
+          [transaction.method]: addToLine(prev.shift[transaction.method], transaction.amount),
         },
         audit: [
           auditEntry(
@@ -1727,7 +1933,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const closeShift = useCallback(
     (
-      counted: { cash: number; card: number },
+      counted: Record<PaymentMethod, number>,
       nextOpeningCash: number,
       user?: string,
       actor?: Actor,
@@ -1739,18 +1945,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         const closed: ClosedShift = {
           ...prev.shift,
           closedAt: now,
-          countedCash: counted.cash,
-          countedCard: counted.card,
+          counted,
           // El real definitivo del corte es lo contado en el arqueo; el expected
           // queda como lo acumuló el sistema. Ahí nace (o muere) el descuadre.
           cash: { ...prev.shift.cash, real: counted.cash },
-          card: { ...prev.shift.card, real: counted.card },
+          debit: { ...prev.shift.debit, real: counted.debit },
+          credit: { ...prev.shift.credit, real: counted.credit },
+          transfer: { ...prev.shift.transfer, real: counted.transfer },
           transactions: prev.transactions,
           expenseList: prev.expenses,
           items,
+          cuadraturas: prev.cuadraturas,
         };
         const cashD = counted.cash - prev.shift.cash.expected;
-        const cardD = counted.card - prev.shift.card.expected;
+        const electronicD =
+          counted.debit -
+          prev.shift.debit.expected +
+          (counted.credit - prev.shift.credit.expected) +
+          (counted.transfer - prev.shift.transfer.expected);
         return {
           ...prev,
           pastShifts: [closed, ...prev.pastShifts],
@@ -1761,7 +1973,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             openedAt: now,
             openingCash: nextOpeningCash,
             cash: { real: 0, expected: 0 },
-            card: { real: 0, expected: 0 },
+            debit: { real: 0, expected: 0 },
+            credit: { real: 0, expected: 0 },
+            transfer: { real: 0, expected: 0 },
             expenses: { real: 0, expected: 0 },
             tipsCash: 0,
             tipsCard: 0,
@@ -1769,12 +1983,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           },
           transactions: [],
           expenses: [],
+          // Los tickets cobrados pertenecen al corte archivado; los pendientes
+          // siguen vivos (la estancia continúa en el turno siguiente).
+          charges: prev.charges.filter((c) => c.status === "pendiente"),
+          cuadraturas: [],
           audit: [
             auditEntry(
               "estado",
               "Cerró el turno",
               "Caja",
-              `Folio ${prev.shift.folio} · dif. efectivo ${formatCLP(cashD)} · dif. tarjeta ${formatCLP(cardD)}`,
+              `Folio ${prev.shift.folio} · dif. efectivo ${formatCLP(cashD)} · dif. tarjetas/transferencia ${formatCLP(electronicD)}`,
               actor,
             ),
             ...prev.audit,
@@ -1825,6 +2043,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     moveRoom,
     logCourtesy,
     extendStay,
+    payCharge,
+    updateStayGuest,
+    logCuadratura,
     addTransaction,
     addExpense,
     sellProduct,

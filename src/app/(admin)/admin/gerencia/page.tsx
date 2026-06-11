@@ -153,7 +153,9 @@ export default function GerenciaPage() {
       topHabitaciones(ROOM_USAGE_90D, 6).map((r) => ({
         hab: `Hab. ${r.roomId}`,
         revenue: r.revenue,
-        black: roomCategory.get(r.roomId) === "black",
+        black:
+          roomCategory.get(r.roomId) === "jacuzzi-black" ||
+          roomCategory.get(r.roomId) === "standard-black",
       })),
     [roomCategory],
   );
@@ -257,7 +259,7 @@ export default function GerenciaPage() {
           </BarChart>
         </ChartCard>
 
-        <ChartCard title="Ocupación últimos 30 días" hint="Promedio diario de las 20 habitaciones.">
+        <ChartCard title="Ocupación últimos 30 días" hint="Promedio diario de las 21 habitaciones.">
           <BarChart data={last30} margin={{ left: 0, right: 8 }}>
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis dataKey="dia" stroke={AXIS} fontSize={10} tickLine={false} axisLine={false} interval={4} />

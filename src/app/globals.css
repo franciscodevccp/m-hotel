@@ -36,19 +36,20 @@
   --maint: #8a837d;
 
   /* Tablero de habitaciones: tarjeta completa coloreada por estado
-     (pedido del cliente: verde libre, azul ocupada, ámbar limpieza, gris mantención) */
+     (código operacional del cliente: verde disponible, rojo ocupada,
+     celeste limpieza, amarillo mantención/bloqueada) */
   --room-free-bg: rgba(124, 154, 107, 0.16);
   --room-free-line: rgba(124, 154, 107, 0.55);
   --room-free-fg: #abc79a;
-  --room-occ-bg: rgba(96, 138, 177, 0.18);
-  --room-occ-line: rgba(96, 138, 177, 0.6);
-  --room-occ-fg: #a9c7e0;
-  --room-clean-bg: rgba(201, 162, 74, 0.15);
-  --room-clean-line: rgba(201, 162, 74, 0.55);
-  --room-clean-fg: #ddba70;
-  --room-maint-bg: rgba(150, 142, 132, 0.14);
-  --room-maint-line: rgba(150, 142, 132, 0.45);
-  --room-maint-fg: #aaa39b;
+  --room-occ-bg: rgba(192, 88, 88, 0.18);
+  --room-occ-line: rgba(192, 88, 88, 0.6);
+  --room-occ-fg: #dfa3a3;
+  --room-clean-bg: rgba(96, 138, 177, 0.18);
+  --room-clean-line: rgba(96, 138, 177, 0.6);
+  --room-clean-fg: #a9c7e0;
+  --room-maint-bg: rgba(201, 162, 74, 0.15);
+  --room-maint-line: rgba(201, 162, 74, 0.55);
+  --room-maint-fg: #ddba70;
 }
 
 /* ----------------------------------------------------------------------------
@@ -85,15 +86,15 @@
   --room-free-bg: #e1eed9;
   --room-free-line: #7da465;
   --room-free-fg: #2f5a1d;
-  --room-occ-bg: #deeaf5;
-  --room-occ-line: #6c94b8;
-  --room-occ-fg: #29506f;
-  --room-clean-bg: #f8ebcf;
-  --room-clean-line: #c2902f;
-  --room-clean-fg: #775711;
-  --room-maint-bg: #eae7e1;
-  --room-maint-line: #9f9786;
-  --room-maint-fg: #57534b;
+  --room-occ-bg: #f6dcdc;
+  --room-occ-line: #bb6a6a;
+  --room-occ-fg: #742727;
+  --room-clean-bg: #deeaf5;
+  --room-clean-line: #6c94b8;
+  --room-clean-fg: #29506f;
+  --room-maint-bg: #f8ebcf;
+  --room-maint-line: #c2902f;
+  --room-maint-fg: #775711;
 }
 
 @theme inline {

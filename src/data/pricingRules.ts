@@ -22,8 +22,8 @@ export const SEED_DISCOUNTS: Discount[] = [
 export const SEED_PROMOTIONS: Promotion[] = [
   {
     id: "promo-01",
-    name: "Noche BLACK",
-    description: "Categoría BLACK 12h al precio de 6h, solo los domingos.",
+    name: "Noche Black",
+    description: "Jacuzzi Black 12h al precio de 6h, solo los domingos.",
     startsAt: "2026-06-01",
     endsAt: "2026-06-30",
     active: true,

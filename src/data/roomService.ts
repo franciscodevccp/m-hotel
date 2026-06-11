@@ -5,7 +5,7 @@ import type { RoomServiceOrder } from "@/types";
 export const SEED_ROOM_SERVICE: RoomServiceOrder[] = [
   {
     id: "rso-310",
-    roomId: "201",
+    roomId: "4",
     items: [
       { productId: seedProductId("Pizza Pepperoni"), quantity: 1 },
       { productId: seedProductId("Corona (330 ml)"), quantity: 2 },
@@ -18,7 +18,7 @@ export const SEED_ROOM_SERVICE: RoomServiceOrder[] = [
   },
   {
     id: "rso-309",
-    roomId: "102",
+    roomId: "2",
     items: [{ productId: seedProductId("Piscola Mistral"), quantity: 1 }],
     total: 4500,
     status: "preparando",

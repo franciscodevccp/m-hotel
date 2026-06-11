@@ -1,18 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { IdScanModal } from "@/components/admin/IdScanModal";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { SegmentedToggle } from "@/components/ui/SegmentedToggle";
-import { formatTime } from "@/lib/format";
+import { cleaningChecklistFor, cleaningKitFor } from "@/data/cleaning";
+import { formatCLP, formatTime } from "@/lib/format";
+import { exampleIdentity } from "@/lib/idScan";
 import { getCategory } from "@/lib/pricing";
+import { normalizeRut } from "@/lib/rut";
 import { RoomQrScanModal } from "@/components/admin/RoomQrScanModal";
 import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import type { Room } from "@/types";
+import type { PaymentMethod, Room, RoomCharge } from "@/types";
 
-type Tab = "pendientes" | "proceso" | "listas";
+type Tab = "pendientes" | "proceso" | "cobros" | "listas";
+
+const PAY_METHODS: { value: PaymentMethod; label: string }[] = [
+  { value: "cash", label: "Efectivo" },
+  { value: "debit", label: "Tarjeta débito" },
+  { value: "credit", label: "Tarjeta crédito" },
+  { value: "transfer", label: "Transferencia" },
+];
 
 function elapsed(fromISO: string | undefined, now: number | null): string | null {
   if (!fromISO || now == null) return null;
@@ -96,12 +107,30 @@ function RoomTask({
 }
 
 export default function AseoPage() {
-  const { rooms, cleaningLog, startCleaning, finishCleaning, reportMaintenance } = useAppStore();
+  const {
+    rooms,
+    cleaningLog,
+    charges,
+    blacklist,
+    startCleaning,
+    finishCleaning,
+    reportMaintenance,
+    payCharge,
+    updateStayGuest,
+  } = useAppStore();
   const { user } = useSession();
   const [now, setNow] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("pendientes");
   const [reporting, setReporting] = useState<Room | null>(null);
   const [note, setNote] = useState("");
+  // Cobro en pieza: ticket seleccionado y método de pago elegido.
+  const [paying, setPaying] = useState<RoomCharge | null>(null);
+  const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
+  // Registro del huésped desde la pieza (escaneo de cédula de la camarera).
+  const [scanningRoom, setScanningRoom] = useState<Room | null>(null);
+  // Checklist obligatorio antes de marcar la pieza lista.
+  const [finishing, setFinishing] = useState<Room | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- siembra la hora actual al montar (cronómetros en vivo)
@@ -117,6 +146,39 @@ export default function AseoPage() {
   const pendientes = rooms.filter((r) => r.status === "cleaning" && !r.cleaningStartedAt);
   const proceso = rooms.filter((r) => r.status === "cleaning" && r.cleaningStartedAt);
   const visible = tab === "pendientes" ? pendientes : tab === "proceso" ? proceso : [];
+  // Tickets de cobro pendientes: el bloque se cobra en la pieza al inicio.
+  const cobros = charges.filter((c) => c.status === "pendiente");
+
+  function confirmPay() {
+    if (!paying) return;
+    payCharge(paying.id, payMethod, by, actor);
+    const room = rooms.find((r) => r.id === paying.roomId);
+    setQrMsg({
+      tone: "ok",
+      text: `Cobro registrado: ${formatCLP(paying.amount)} en la habitación ${room?.number ?? paying.roomId} (${PAY_METHODS.find((m) => m.value === payMethod)?.label.toLowerCase()}). Entró al corte del turno.`,
+    });
+    setPaying(null);
+    setPayMethod("cash");
+  }
+
+  /** El escaneo de la camarera registra al huésped y consulta la lista negra. */
+  function handleGuestScan(name: string, rut: string) {
+    if (!scanningRoom) return;
+    updateStayGuest(scanningRoom.id, name, rut, actor);
+    const match = blacklist.find((b) => b.rut && normalizeRut(b.rut) === normalizeRut(rut));
+    setQrMsg(
+      match
+        ? {
+            tone: "busy",
+            text: `Alerta: ${match.name} está en la lista negra (${match.reason}). Avisa a recepción antes de continuar.`,
+          }
+        : {
+            tone: "ok",
+            text: `Huésped registrado en la habitación ${scanningRoom.number}: ${name || "sin nombre"} · ${rut}. Recepción ya lo ve en el tablero.`,
+          },
+    );
+    setScanningRoom(null);
+  }
 
   /** El QR de la pieza reemplaza el talonario: inicia el aseo a nombre de quien escanea. */
   function handleScannedRoom(roomNumber: number) {
@@ -160,7 +222,8 @@ export default function AseoPage() {
           <span className="kicker text-gold">Aseo</span>
           <h1 className="mt-3 font-display text-3xl text-cream sm:text-4xl">Mis habitaciones</h1>
           <p className="mt-2 text-sm text-muted">
-            Escanea el QR de la pieza al entrar: queda a tu nombre y corre el tiempo.
+            Escanea el QR de la pieza al entrar: queda a tu nombre y corre el tiempo. En
+            Cobros están los tickets por cobrar en la pieza.
           </p>
         </div>
         <Button size="lg" onClick={() => { setQrMsg(null); setQrOpen(true); }} className="shrink-0">
@@ -181,9 +244,10 @@ export default function AseoPage() {
         </div>
       )}
 
-      <div className="mb-6 grid grid-cols-3 gap-3">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Counter label="Por limpiar" value={pendientes.length} tone="text-clean" />
         <Counter label="En proceso" value={proceso.length} tone="text-cream" />
+        <Counter label="Cobros" value={cobros.length} tone="text-gold" />
         <Counter label="Terminadas" value={cleaningLog.length} tone="text-ok" />
       </div>
 
@@ -191,6 +255,7 @@ export default function AseoPage() {
         segments={[
           { value: "pendientes", label: "Por limpiar" },
           { value: "proceso", label: "En proceso" },
+          { value: "cobros", label: "Cobros" },
           { value: "listas", label: "Listas hoy" },
         ]}
         value={tab}
@@ -199,7 +264,62 @@ export default function AseoPage() {
       />
 
       <div className="mt-6 space-y-3">
-        {tab === "listas" ? (
+        {tab === "cobros" ? (
+          cobros.length === 0 ? (
+            <EmptyState text="Sin cobros pendientes ✦" />
+          ) : (
+            cobros.map((charge) => {
+              const room = rooms.find((r) => r.id === charge.roomId);
+              if (!room) return null;
+              const category = getCategory(room.categoryId);
+              const since = elapsed(charge.createdAt, now);
+              return (
+                <div key={charge.id} className="border border-line bg-surface/40 p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="font-display text-3xl text-cream">Habitación {room.number}</p>
+                      <p className="kicker mt-1 text-dim">
+                        {category.shortName} · {charge.concept}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="tnum font-display text-2xl text-gold">
+                        {formatCLP(charge.amount)}
+                      </p>
+                      {since && <p className="mt-1 text-xs text-dim">Esperando {since}</p>}
+                    </div>
+                  </div>
+                  {charge.courtesies.length > 0 && (
+                    <p className="mt-3 border-t border-line pt-3 text-sm text-muted">
+                      <span className="kicker text-dim">Preparar y llevar · </span>
+                      {charge.courtesies.join(" · ")}
+                    </p>
+                  )}
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <Button
+                      size="lg"
+                      className="w-full"
+                      onClick={() => {
+                        setPayMethod("cash");
+                        setPaying(charge);
+                      }}
+                    >
+                      Registrar cobro
+                    </Button>
+                    <Button
+                      size="lg"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => setScanningRoom(room)}
+                    >
+                      Escanear cédula
+                    </Button>
+                  </div>
+                </div>
+              );
+            })
+          )
+        ) : tab === "listas" ? (
           cleaningLog.length === 0 ? (
             <EmptyState text="Aún no terminas habitaciones." />
           ) : (
@@ -234,7 +354,10 @@ export default function AseoPage() {
               now={now}
               tab={tab}
               onStart={() => startCleaning(room.id, by)}
-              onFinish={() => finishCleaning(room.id, actor)}
+              onFinish={() => {
+                setChecked(new Set());
+                setFinishing(room);
+              }}
               onReport={() => {
                 setReporting(room);
                 setNote("");
@@ -282,6 +405,132 @@ export default function AseoPage() {
             </Button>
           </div>
         </Modal>
+      )}
+
+      {/* Checklist obligatorio antes de confirmar la pieza lista */}
+      {finishing && (
+        <Modal
+          title={`Habitación ${finishing.number} lista`}
+          subtitle="Checklist de limpieza"
+          onClose={() => setFinishing(null)}
+        >
+          <div className="space-y-4">
+            <p className="text-sm leading-relaxed text-muted">
+              Marca cada tarea antes de confirmar. La pieza vuelve a Disponible y los insumos
+              del aseo se descuentan solos del inventario.
+            </p>
+            <div className="divide-y divide-line border border-line bg-surface/40">
+              {cleaningChecklistFor(finishing.categoryId).map((task) => {
+                const done = checked.has(task);
+                return (
+                  <label
+                    key={task}
+                    className="flex cursor-pointer items-center gap-3 px-4 py-3 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={done}
+                      onChange={() =>
+                        setChecked((c) => {
+                          const next = new Set(c);
+                          if (next.has(task)) next.delete(task);
+                          else next.add(task);
+                          return next;
+                        })
+                      }
+                      className="accent-[var(--gold)]"
+                    />
+                    <span className={done ? "text-cream" : "text-muted"}>{task}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-xs leading-relaxed text-dim">
+              Insumos de esta categoría:{" "}
+              {cleaningKitFor(finishing.categoryId)
+                .map((k) => k.label)
+                .join(" · ")}
+              .
+            </p>
+            <Button
+              size="lg"
+              className="w-full"
+              disabled={checked.size < cleaningChecklistFor(finishing.categoryId).length}
+              onClick={() => {
+                finishCleaning(finishing.id, actor);
+                setQrMsg({
+                  tone: "ok",
+                  text: `Habitación ${finishing.number} lista: checklist completo e insumos descontados del inventario.`,
+                });
+                setFinishing(null);
+              }}
+            >
+              Confirmar pieza lista
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Cobro en pieza: registrar el pago del ticket */}
+      {paying && (
+        <Modal
+          title={`Cobro · Habitación ${rooms.find((r) => r.id === paying.roomId)?.number ?? paying.roomId}`}
+          subtitle={paying.concept}
+          onClose={() => setPaying(null)}
+        >
+          <div className="space-y-5">
+            <div className="flex items-baseline justify-between border-b border-line pb-4">
+              <span className="kicker text-dim">Total a cobrar</span>
+              <span className="tnum font-display text-2xl text-gold">
+                {formatCLP(paying.amount)}
+              </span>
+            </div>
+            {paying.courtesies.length > 0 && (
+              <p className="text-sm text-muted">
+                <span className="kicker text-dim">Llevar · </span>
+                {paying.courtesies.join(" · ")}
+              </p>
+            )}
+            <div>
+              <span className="kicker text-dim">Medio de pago</span>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {PAY_METHODS.map((m) => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setPayMethod(m.value)}
+                    className={cn(
+                      "border px-3 py-2.5 text-sm transition-colors",
+                      payMethod === m.value
+                        ? "border-gold/70 text-gold"
+                        : "border-line text-muted hover:border-line-strong hover:text-cream",
+                    )}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="text-xs leading-relaxed text-dim">
+              El pago queda asociado a la habitación, a tu usuario y al turno en curso.
+            </p>
+            <Button size="lg" className="w-full" onClick={confirmPay}>
+              Confirmar cobro
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Escaneo de cédula desde la pieza: registra al huésped y consulta lista negra */}
+      {scanningRoom && (
+        <IdScanModal
+          onResult={({ name, rut }) => handleGuestScan(name ?? "", rut ?? "")}
+          onSimulate={() => {
+            const identity = exampleIdentity(scanningRoom.number);
+            handleGuestScan(identity.name, identity.rut);
+          }}
+          onClose={() => setScanningRoom(null)}
+        />
       )}
 
       {qrOpen && (

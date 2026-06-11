@@ -83,7 +83,7 @@ export default function ReservasPage() {
 
   // Carga manual de reserva (lo que más usa recepción).
   const [showNew, setShowNew] = useState(false);
-  const [npCategory, setNpCategory] = useState<CategoryId>(categories[0]?.id ?? "standard");
+  const [npCategory, setNpCategory] = useState<CategoryId>(categories[0]?.id ?? "standard-vip");
   const [npRoomId, setNpRoomId] = useState("");
   const [npDate, setNpDate] = useState("");
   const [npDuration, setNpDuration] = useState<Duration>(3);

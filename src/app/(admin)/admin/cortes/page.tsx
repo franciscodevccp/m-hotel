@@ -17,7 +17,7 @@ function diffClass(diff: number): string {
 }
 
 export default function CortesPage() {
-  const { shift, pastShifts, products, movements } = useAppStore();
+  const { shift, pastShifts, products, movements, transactions } = useAppStore();
   const { user } = useSession();
   const [selected, setSelected] = useState<ClosedShift | null>(null);
   // El corte en curso itemiza TODO el catálogo: carta y sexshop entran al mismo corte.
@@ -57,7 +57,7 @@ export default function CortesPage() {
       </div>
 
       <div className="grid items-start gap-6 lg:grid-cols-[1.3fr_1fr]">
-        <ShiftSummary shift={shift} />
+        <ShiftSummary shift={shift} transactions={transactions} />
         <div className="border border-line bg-surface/40 p-4">
           <CorteTicket shift={shift} items={items} />
         </div>
@@ -86,8 +86,12 @@ export default function CortesPage() {
             </div>
             <ul>
               {pastShifts.map((closed) => {
-                const cashD = closed.countedCash - closed.cash.expected;
-                const cardD = closed.countedCard - closed.card.expected;
+                const cashD = closed.counted.cash - closed.cash.expected;
+                const cardD =
+                  closed.counted.debit -
+                  closed.debit.expected +
+                  (closed.counted.credit - closed.credit.expected) +
+                  (closed.counted.transfer - closed.transfer.expected);
                 return (
                   <li key={closed.id} className="border-b border-line last:border-b-0">
                     <button
@@ -101,7 +105,12 @@ export default function CortesPage() {
                       </span>
                       <span className="truncate text-sm text-muted">{closed.user}</span>
                       <span className="tnum text-sm text-cream sm:text-right">
-                        {formatCLP(closed.countedCash + closed.countedCard)}
+                        {formatCLP(
+                          closed.counted.cash +
+                            closed.counted.debit +
+                            closed.counted.credit +
+                            closed.counted.transfer,
+                        )}
                       </span>
                       <span className="tnum text-sm sm:text-right">
                         <span className={cn(diffClass(cashD))}>

@@ -22,6 +22,21 @@ export function extraHourFor(category: Category, dayType: DayType): number {
   return category.pricing.extraHour[dayType];
 }
 
+/** Valor de la persona adicional (informativo en la demo). */
+export function extraPersonFor(category: Category, dayType: DayType): number {
+  return category.pricing.extraPerson[dayType];
+}
+
+/** La línea Black lleva el acento visual de la casa (dorado sobre negro). */
+export function isBlackLine(id: CategoryId): boolean {
+  return id === "standard-black" || id === "jacuzzi-black";
+}
+
+/** Categorías de la línea Jacuzzi (espuma, sanitizado y kit de aseo mayor). */
+export function hasJacuzzi(id: CategoryId): boolean {
+  return id === "jacuzzi-vip" || id === "jacuzzi-premium" || id === "jacuzzi-black";
+}
+
 /** Precio "desde": el menor de la categoría (entre semana, 3 horas). */
 export function fromPrice(category: Category): number {
   return category.pricing.weekday[3];
