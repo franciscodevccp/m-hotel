@@ -1,3 +1,4 @@
+import { openingPackFor } from "@/data/courtesies";
 import { DEMO_CLIENT } from "@/lib/demo";
 import { getCategory, priceFor } from "@/lib/pricing";
 import type { Room } from "@/types";
@@ -36,6 +37,25 @@ export const ROOMS: Room[] = [
       paymentMethod: "credit",
       paidAt: "2026-06-09T21:48:00",
     },
+    // Paquete de ingreso entregado al abrir + una cortesía pedida por
+    // citófono: puebla el listado editable de cortesías del tablero.
+    courtesies: [
+      ...openingPackFor("jacuzzi-premium").map((c, i) => ({
+        id: `sc-12-${i}`,
+        productId: c.productId,
+        label: c.label,
+        quantity: c.quantity,
+        at: "2026-06-09T21:30:00",
+        opening: true,
+      })),
+      {
+        id: "sc-12-extra",
+        productId: "p-760798819006",
+        label: "Vaso de espumante",
+        quantity: 1,
+        at: "2026-06-09T21:55:00",
+      },
+    ],
   },
   { id: "13", number: 13, categoryId: "jacuzzi-premium", status: "cleaning" },
   { id: "14", number: 14, categoryId: "jacuzzi-premium", status: "available" },

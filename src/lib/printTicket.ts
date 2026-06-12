@@ -7,11 +7,13 @@ import { formatCLP } from "@/lib/format";
 // (En producción se puede sumar impresión silenciosa vía ESC/POS o un agente
 // local tipo QZ Tray; el formato del ticket es el mismo.)
 
-/** Línea de la comanda: cantidad, nombre y monto (null = cortesía sin cobro). */
+/** Línea de la comanda: cantidad, nombre y monto (null = sin cobro). */
 export interface TicketLine {
   qty: number;
   name: string;
   amount: number | null;
+  /** Texto que reemplaza el monto cuando amount es null (default "Cortesía"). */
+  tag?: string;
 }
 
 export interface ComandaData {
@@ -37,7 +39,7 @@ export function comandaHtml(data: ComandaData): string {
       (l) => `
       <div class="row">
         <span class="name">${l.qty}&times; ${esc(l.name)}</span>
-        <span class="amt">${l.amount == null ? "Cortesía" : formatCLP(l.amount)}</span>
+        <span class="amt">${l.amount == null ? esc(l.tag ?? "Cortesía") : formatCLP(l.amount)}</span>
       </div>`,
     )
     .join("");
@@ -66,6 +68,55 @@ export interface GuiaLine {
   name: string;
   requested: number;
   delivered: number;
+}
+
+export interface SolicitudData {
+  id: string;
+  from: string; // nombre de bodega de origen
+  to: string; // nombre de bodega de destino
+  at: string; // fecha/hora de la solicitud, ya formateada
+  requestedBy: string;
+  lines: { name: string; requested: number }[];
+  note?: string;
+}
+
+/**
+ * Vale de solicitud de reposición (cuerpo, sin <html>): el papel que el
+ * bodeguero lleva a la bodega central para preparar el pedido. Lleva casilla
+ * para marcar cada línea y espacio para anotar a mano lo entregado; el folio
+ * de guía se asigna al registrar la entrega en el sistema.
+ */
+export function solicitudHtml(data: SolicitudData): string {
+  const lines = data.lines
+    .map(
+      (l) => `
+      <div class="row">
+        <span class="name"><span class="chk"></span>${l.requested}&times; ${esc(l.name)}</span>
+        <span class="amt">Entreg. ____</span>
+      </div>`,
+    )
+    .join('<div class="sep-soft"></div>');
+
+  return `
+    <div class="center">
+      <p class="brand">M MOTEL</p>
+      <p>Av. Palmira Romano Sur 196-A · Limache</p>
+      <p class="big">SOLICITUD DE REPOSICIÓN</p>
+      <p class="banner">${esc(data.id.toUpperCase())}</p>
+    </div>
+    <div class="sep"></div>
+    <div class="row"><span>${esc(data.from)}</span><span>&rarr;</span><span>${esc(data.to)}</span></div>
+    <p>Solicitada: ${esc(data.at)}</p>
+    <p>Solicita: ${esc(data.requestedBy)}</p>
+    <div class="sep"></div>
+    ${lines}
+    <div class="sep"></div>
+    <p>Prepara y entrega: ________________________</p>
+    <p>Recibe conforme: ________________________</p>
+    ${data.note ? `<div class="sep"></div><p>Nota: ${esc(data.note)}</p>` : ""}
+    <div class="sep"></div>
+    <p class="center">Marcar cada línea al preparar. El folio de guía de despacho se asigna al registrar la entrega en el sistema.</p>
+  `;
 }
 
 export interface GuiaData {
@@ -140,6 +191,7 @@ const TICKET_CSS = `
   .sep-soft { margin: 4px 0; }
   .row { display: flex; justify-content: space-between; gap: 8px; }
   .row.cols { gap: 4px; font-size: 11px; }
+  .chk { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border: 1px solid #000; vertical-align: baseline; }
   .row .name { min-width: 0; }
   .row .amt { flex-shrink: 0; }
   .total { font-size: 14px; font-weight: 700; }

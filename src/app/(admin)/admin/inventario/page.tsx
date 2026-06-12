@@ -669,6 +669,33 @@ const MOVEMENT_LABELS: Record<MovementType, string> = {
   traspaso: "Traspaso entre bodegas",
 };
 
+/** Clasificación operacional del movimiento (para métricas y filtro). */
+type MovementKind = "ingreso" | "venta" | "cortesia" | "traspaso" | "ajuste";
+
+function movementKind(m: InventoryMovement): MovementKind {
+  if (m.type === "ingreso") return "ingreso";
+  if (m.type === "venta_presencial" || m.type === "venta_online") return "venta";
+  if (m.type === "traspaso") return "traspaso";
+  if (m.refId?.startsWith("cortesia") || m.refId?.startsWith("aseo")) return "cortesia";
+  return "ajuste";
+}
+
+const KIND_FILTERS: { value: string; label: string }[] = [
+  { value: "all", label: "Todos los movimientos" },
+  { value: "ingreso", label: "Ingresos de stock" },
+  { value: "venta", label: "Ventas" },
+  { value: "cortesia", label: "Cortesías y aseo" },
+  { value: "traspaso", label: "Traspasos entre bodegas" },
+  { value: "ajuste", label: "Ajustes y regularización" },
+];
+
+const MOVEMENT_FAMILY_OPTIONS: { value: string; label: string }[] = [
+  { value: "all", label: "Todo el recinto" },
+  { value: "carta", label: "Carta / room service" },
+  { value: "sexshop", label: "Sexshop" },
+  { value: "insumo", label: "Insumos" },
+];
+
 function MovementsModal({
   movements,
   products,
@@ -682,13 +709,69 @@ function MovementsModal({
   family: ProductCategory;
   onClose: () => void;
 }) {
-  const byId = new Map(products.map((p) => [p.id, p]));
-  const transferById = new Map(transfers.map((t) => [t.id, t]));
-  // Solo los movimientos de la familia del área activa (carta o sexshop).
-  const recent = [...movements]
-    .filter((m) => byId.get(m.productId)?.category === family)
-    .sort((a, b) => b.at.localeCompare(a.at))
-    .slice(0, 50);
+  const [kind, setKind] = useState("all");
+  const [familyFilter, setFamilyFilter] = useState<string>(family);
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const transferById = useMemo(() => new Map(transfers.map((t) => [t.id, t])), [transfers]);
+
+  const q = query.trim().toLowerCase();
+  // Universo del informe: familia + búsqueda (las métricas se calculan aquí;
+  // el filtro por tipo solo acota la lista).
+  const universe = useMemo(
+    () =>
+      [...movements]
+        .filter((m) => {
+          const p = byId.get(m.productId);
+          if (!p) return false;
+          if (familyFilter !== "all" && p.category !== familyFilter) return false;
+          return !q || p.name.toLowerCase().includes(q);
+        })
+        .sort((a, b) => b.at.localeCompare(a.at)),
+    [movements, byId, familyFilter, q],
+  );
+  const visible = useMemo(
+    () => universe.filter((m) => kind === "all" || movementKind(m) === kind).slice(0, 120),
+    [universe, kind],
+  );
+
+  // Métricas del período registrado: unidades por clase y su valorización.
+  const metrics = useMemo(() => {
+    const acc = {
+      ingreso: { units: 0, value: 0 },
+      venta: { units: 0, value: 0 },
+      cortesia: { units: 0, value: 0 },
+      traspaso: { units: 0, value: 0 },
+      ajuste: { units: 0, value: 0 },
+    };
+    for (const m of universe) {
+      const p = byId.get(m.productId);
+      const k = movementKind(m);
+      const units = Math.abs(m.quantity);
+      acc[k].units += units;
+      // Ventas a precio; el resto al costo (insumo/cortesía entregada).
+      acc[k].value += units * (k === "venta" ? (p?.price ?? 0) : (p?.cost ?? 0));
+    }
+    return acc;
+  }, [universe, byId]);
+
+  // Mayores salidas (ventas + cortesías) por producto, para el ranking.
+  const topOut = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const m of universe) {
+      const k = movementKind(m);
+      if (k !== "venta" && k !== "cortesia") continue;
+      out.set(m.productId, (out.get(m.productId) ?? 0) + Math.abs(m.quantity));
+    }
+    return [...out.entries()]
+      .map(([productId, units]) => ({ product: byId.get(productId), units }))
+      .filter((e) => e.product)
+      .sort((a, b) => b.units - a.units)
+      .slice(0, 5);
+  }, [universe, byId]);
+  const topMax = topOut[0]?.units ?? 1;
 
   function movementLabel(m: InventoryMovement): string {
     if (m.type === "traspaso" && m.refId) {
@@ -698,35 +781,220 @@ function MovementsModal({
     return MOVEMENT_LABELS[m.type];
   }
 
+  /** PDF con el detalle filtrado y el resumen, con el membrete de la casa. */
+  async function downloadReport() {
+    setBusy(true);
+    try {
+      const { jsPDF } = await import("jspdf");
+      const autoTable = (await import("jspdf-autotable")).default;
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const left = 40;
+
+      doc.setFont("times", "bold");
+      doc.setFontSize(26);
+      doc.setTextColor(201, 162, 74);
+      doc.text("M", left, 52);
+      doc.setDrawColor(201, 162, 74);
+      doc.setLineWidth(1.5);
+      doc.line(left, 62, pageW - left, 62);
+      doc.setFont("times", "bold");
+      doc.setFontSize(18);
+      doc.setTextColor(28, 26, 24);
+      doc.text("Informe de movimientos de inventario", left, 92);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(111, 104, 95);
+      doc.text(
+        `${MOVEMENT_FAMILY_OPTIONS.find((o) => o.value === familyFilter)?.label} · ${KIND_FILTERS.find((o) => o.value === kind)?.label} · Generado ${formatDateTime(new Date())}`,
+        left,
+        108,
+      );
+
+      const rows = universe
+        .filter((m) => kind === "all" || movementKind(m) === kind)
+        .slice(0, 400)
+        .map((m) => [
+          formatDateTime(new Date(m.at)),
+          byId.get(m.productId)?.name ?? m.productId,
+          movementLabel(m),
+          m.user ?? "—",
+          `${m.quantity > 0 ? "+" : ""}${m.quantity}`,
+        ]);
+      autoTable(doc, {
+        startY: 130,
+        head: [["Fecha", "Producto", "Movimiento", "Responsable / detalle", "Cant."]],
+        body: rows,
+        theme: "striped",
+        margin: { left, right: left },
+        styles: { fontSize: 8, cellPadding: 4, textColor: [28, 26, 24], lineColor: [235, 230, 221], lineWidth: 0.4 },
+        headStyles: { fillColor: [201, 162, 74], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8 },
+        alternateRowStyles: { fillColor: [250, 247, 241] },
+        columnStyles: { 4: { halign: "right", cellWidth: 36 } },
+      });
+
+      const pageH = doc.internal.pageSize.getHeight();
+      const lat = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable;
+      let y = (lat?.finalY ?? 200) + 28;
+      if (y > pageH - 150) {
+        doc.addPage();
+        y = 60;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(138, 131, 125);
+      doc.text("RESUMEN DEL PERÍODO REGISTRADO", left, y);
+      y += 18;
+      const summary: [string, string][] = [
+        ["Ingresos de stock", `${metrics.ingreso.units} un.`],
+        ["Ventas", `${metrics.venta.units} un. · ${formatCLP(metrics.venta.value)}`],
+        ["Cortesías y aseo (costo)", `${metrics.cortesia.units} un. · ${formatCLP(metrics.cortesia.value)}`],
+        ["Traspasos entre bodegas", `${metrics.traspaso.units} un.`],
+        ["Ajustes y regularización", `${metrics.ajuste.units} un.`],
+      ];
+      doc.setFontSize(10);
+      for (const [label, value] of summary) {
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(90, 84, 76);
+        doc.text(label, left, y);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(28, 26, 24);
+        doc.text(value, pageW - left, y, { align: "right" });
+        y += 18;
+      }
+
+      const now = new Date();
+      const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+      doc.save(`movimientos-inventario-${stamp}.pdf`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <Modal title="Movimientos de inventario" subtitle="Historial del stock" onClose={onClose}>
-      {recent.length === 0 ? (
-        <p className="text-sm text-dim">Aún no hay movimientos registrados.</p>
-      ) : (
-        <ul className="-mr-2 max-h-[60vh] divide-y divide-line overflow-y-auto pr-2">
-          {recent.map((m) => (
-            <li key={m.id} className="grid grid-cols-[1fr_auto] items-center gap-2 py-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm text-cream">
-                  {byId.get(m.productId)?.name ?? m.productId}
-                </p>
-                <p className="text-xs text-dim">
-                  {movementLabel(m)} · {formatDateTime(new Date(m.at))}
-                  {m.user ? ` · ${m.user}` : ""}
-                </p>
-              </div>
-              <span
-                className={cn(
-                  "tnum text-sm",
-                  m.quantity > 0 ? "text-ok" : "text-busy",
-                )}
-              >
-                {m.quantity > 0 ? `+${m.quantity}` : m.quantity}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+    <Modal title="Movimientos de inventario" subtitle="Métricas e informe del stock" onClose={onClose} wide>
+      <div className="space-y-5">
+        {/* Métricas del período registrado */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="border border-line bg-surface/40 p-3.5">
+            <p className="kicker text-dim">Ingresos</p>
+            <p className="tnum mt-1.5 font-display text-xl text-cream">
+              {metrics.ingreso.units} <span className="text-sm text-dim">un.</span>
+            </p>
+          </div>
+          <div className="border border-line bg-surface/40 p-3.5">
+            <p className="kicker text-dim">Ventas</p>
+            <p className="tnum mt-1.5 font-display text-xl text-cream">
+              {metrics.venta.units} <span className="text-sm text-dim">un.</span>
+            </p>
+            <p className="tnum mt-0.5 text-xs text-gold">{formatCLP(metrics.venta.value)}</p>
+          </div>
+          <div className="border border-line bg-surface/40 p-3.5">
+            <p className="kicker text-dim">Cortesías y aseo</p>
+            <p className="tnum mt-1.5 font-display text-xl text-cream">
+              {metrics.cortesia.units} <span className="text-sm text-dim">un.</span>
+            </p>
+            <p className="tnum mt-0.5 text-xs text-muted">
+              costo {formatCLP(metrics.cortesia.value)}
+            </p>
+          </div>
+          <div className="border border-line bg-surface/40 p-3.5">
+            <p className="kicker text-dim">Traspasos</p>
+            <p className="tnum mt-1.5 font-display text-xl text-cream">
+              {metrics.traspaso.units} <span className="text-sm text-dim">un.</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Filtros del informe */}
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Select
+            value={familyFilter}
+            onValueChange={setFamilyFilter}
+            ariaLabel="Familia"
+            className="mt-0 sm:w-52"
+            options={MOVEMENT_FAMILY_OPTIONS}
+          />
+          <Select
+            value={kind}
+            onValueChange={setKind}
+            ariaLabel="Tipo de movimiento"
+            className="mt-0 sm:w-56"
+            options={KIND_FILTERS}
+          />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar producto"
+            className="min-h-[44px] w-full flex-1 rounded-sm border border-line bg-surface px-4 py-2.5 text-sm text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none"
+          />
+          <Button variant="secondary" onClick={downloadReport} disabled={busy} className="shrink-0">
+            {busy ? "Generando…" : "Descargar informe"}
+          </Button>
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
+          {/* Detalle de movimientos */}
+          {visible.length === 0 ? (
+            <p className="border border-line bg-surface/40 px-4 py-8 text-sm text-dim">
+              Sin movimientos para estos filtros.
+            </p>
+          ) : (
+            <ul className="-mr-2 max-h-[46vh] divide-y divide-line overflow-y-auto border border-line bg-surface/40 px-4 pr-2">
+              {visible.map((m) => (
+                <li key={m.id} className="grid grid-cols-[1fr_auto] items-center gap-2 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-cream">
+                      {byId.get(m.productId)?.name ?? m.productId}
+                    </p>
+                    <p className="text-xs text-dim">
+                      {movementLabel(m)} · {formatDateTime(new Date(m.at))}
+                      {m.user ? ` · ${m.user}` : ""}
+                    </p>
+                  </div>
+                  <span
+                    className={cn("tnum text-sm", m.quantity > 0 ? "text-ok" : "text-busy")}
+                  >
+                    {m.quantity > 0 ? `+${m.quantity}` : m.quantity}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* Mayores salidas del período */}
+          <div className="border border-line bg-surface/40 p-4">
+            <p className="kicker text-dim">Mayores salidas (ventas + cortesías)</p>
+            {topOut.length === 0 ? (
+              <p className="mt-3 text-sm text-dim">Sin salidas registradas.</p>
+            ) : (
+              <ul className="mt-3 space-y-3">
+                {topOut.map((e) => (
+                  <li key={e.product?.id}>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="min-w-0 truncate text-sm text-cream">
+                        {e.product?.name}
+                      </span>
+                      <span className="tnum shrink-0 text-sm text-gold">{e.units} un.</span>
+                    </div>
+                    <div className="mt-1 h-1 w-full bg-surface-2">
+                      <div
+                        className="h-1 bg-gold/60"
+                        style={{ width: `${Math.max(6, Math.round((e.units / topMax) * 100))}%` }}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-4 text-xs leading-relaxed text-dim">
+              Las ventas se valorizan a precio de venta; cortesías e insumos, al costo. La
+              regularización de la carga inicial queda en “Ajustes”.
+            </p>
+          </div>
+        </div>
+      </div>
     </Modal>
   );
 }

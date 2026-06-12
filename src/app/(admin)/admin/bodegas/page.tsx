@@ -7,10 +7,11 @@ import { Modal } from "@/components/ui/Modal";
 import { ProductThumb } from "@/components/ui/ProductThumb";
 import { Select } from "@/components/ui/Select";
 import { SegmentedToggle } from "@/components/ui/SegmentedToggle";
+import { nextGuideFolio } from "@/data/transfers";
 import { WAREHOUSES, warehouseName } from "@/data/warehouses";
 import { centralOf, laundryOf, stockOf, totalOf } from "@/lib/inventory";
 import { formatDateTime, formatTime } from "@/lib/format";
-import { guiaHtml, printTicket } from "@/lib/printTicket";
+import { guiaHtml, printTicket, solicitudHtml } from "@/lib/printTicket";
 import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -99,6 +100,7 @@ export default function BodegasPage() {
   const [query, setQuery] = useState("");
   const [familyFilter, setFamilyFilter] = useState("all");
   const [page, setPage] = useState(0);
+  const [printMsg, setPrintMsg] = useState<string | null>(null);
   const [transferModal, setTransferModal] = useState<"solicitud" | "directo" | null>(null);
   const [prefillId, setPrefillId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Transfer | null>(null);
@@ -192,6 +194,55 @@ export default function BodegasPage() {
     setTransferModal(canDeliver ? "directo" : "solicitud");
   }
 
+  const POPUP_BLOCKED =
+    "El navegador bloqueó la ventana de impresión. Permite ventanas emergentes y vuelve a intentarlo.";
+
+  /**
+   * Vale de solicitud impreso: el papel que el bodeguero lleva a la bodega
+   * central para preparar el pedido (allá no hay computador).
+   */
+  function printSolicitud(t: Pick<Transfer, "id" | "from" | "to" | "items" | "requestedBy" | "createdAt" | "note">) {
+    const ok = printTicket(
+      solicitudHtml({
+        id: `Solicitud ${t.id}`,
+        from: warehouseName(t.from),
+        to: warehouseName(t.to),
+        at: formatDateTime(new Date(t.createdAt)),
+        requestedBy: t.requestedBy,
+        lines: t.items.map((it) => ({
+          name: nameById.get(it.productId) ?? it.productId,
+          requested: it.quantity,
+        })),
+        note: t.note,
+      }),
+      `Solicitud de reposición ${t.id}`,
+    );
+    setPrintMsg(ok ? null : POPUP_BLOCKED);
+  }
+
+  /** Guía de despacho impresa (folio asignado al entregar). */
+  function printGuia(t: Transfer, folioOverride?: number) {
+    const ok = printTicket(
+      guiaHtml({
+        folio: folioOverride ?? t.folio ?? 0,
+        from: warehouseName(t.from),
+        to: warehouseName(t.to),
+        at: formatDateTime(new Date(t.deliveredAt ?? t.createdAt)),
+        requestedBy: t.requestedBy,
+        deliveredBy: t.deliveredBy ?? userLabel,
+        receivedBy: t.receivedBy,
+        lines: t.items.map((it) => ({
+          name: nameById.get(it.productId) ?? it.productId,
+          requested: it.quantity,
+          delivered: it.delivered ?? it.quantity,
+        })),
+        note: t.note,
+      }),
+      `Guía de despacho ${folioOverride ?? t.folio ?? t.id}`,
+    );
+    setPrintMsg(ok ? null : POPUP_BLOCKED);
+  }
+
   return (
     <div className="mx-auto max-w-5xl">
       <div className="mb-8 flex items-start justify-between gap-4">
@@ -277,6 +328,12 @@ export default function BodegasPage() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {printMsg && (
+        <div className="mb-5 border border-busy/50 bg-busy/10 px-4 py-3">
+          <p className="text-sm text-busy">{printMsg}</p>
         </div>
       )}
 
@@ -453,9 +510,8 @@ export default function BodegasPage() {
                   {t.receivedBy ? ` · Recibió ${t.receivedBy}` : ""}
                 </p>
               </button>
-              {(t.status === "solicitado" && canDeliver) ||
-              ((t.status === "entregado" || t.status === "parcial") && canRequest) ? (
-                <div className="flex gap-3 border-t border-line px-5 py-3">
+              {t.status !== "rechazado" && (
+                <div className="flex flex-wrap gap-3 border-t border-line px-5 py-3">
                   {t.status === "solicitado" && canDeliver && (
                     <>
                       <Button size="sm" onClick={() => setDelivering(t)}>
@@ -475,8 +531,18 @@ export default function BodegasPage() {
                       Confirmar recepción
                     </Button>
                   )}
+                  {/* El papel viaja a bodega central: allá no hay computador. */}
+                  {t.status === "solicitado" ? (
+                    <Button size="sm" variant="ghost" onClick={() => printSolicitud(t)}>
+                      Imprimir solicitud
+                    </Button>
+                  ) : t.folio ? (
+                    <Button size="sm" variant="ghost" onClick={() => printGuia(t)}>
+                      Imprimir guía
+                    </Button>
+                  ) : null}
                 </div>
-              ) : null}
+              )}
             </div>
           ))}
         </div>
@@ -549,7 +615,17 @@ export default function BodegasPage() {
           }}
           onSubmit={(items, note, from, to) => {
             if (transferModal === "solicitud") {
-              requestTransfer(items, userLabel, note, actor, to);
+              const id = requestTransfer(items, userLabel, note, actor, to);
+              // El vale sale solo: con ese papel el bodeguero prepara el pedido.
+              printSolicitud({
+                id,
+                from: "central",
+                to,
+                items,
+                requestedBy: userLabel,
+                createdAt: new Date().toISOString(),
+                note: note.trim() || undefined,
+              });
             } else {
               createDirectTransfer(from, to, items, userLabel, actor);
             }
@@ -688,7 +764,25 @@ export default function BodegasPage() {
           products={products}
           onClose={() => setDelivering(null)}
           onConfirm={(quantities) => {
+            const folio = nextGuideFolio(transfers);
             deliverTransfer(delivering.id, userLabel, actor, quantities);
+            // La guía definitiva sale sola: acompaña la mercadería al destino.
+            printGuia(
+              {
+                ...delivering,
+                deliveredBy: userLabel,
+                deliveredAt: new Date().toISOString(),
+                items: delivering.items.map((it) => {
+                  const p = products.find((x) => x.id === it.productId);
+                  const available = p ? Math.max(0, stockOf(p, delivering.from)) : 0;
+                  return {
+                    ...it,
+                    delivered: Math.min(quantities[it.productId] ?? 0, it.quantity, available),
+                  };
+                }),
+              },
+              folio,
+            );
             setDelivering(null);
           }}
         />
@@ -795,6 +889,95 @@ export default function BodegasPage() {
   );
 }
 
+/* ------------------------------------------------ Buscador de producto */
+
+/**
+ * Buscador con filtrado en vivo para la reposición (pedido del cliente):
+ * se escriben las primeras letras y la lista muestra solo las coincidencias.
+ */
+function ProductPicker({
+  products,
+  value,
+  onSelect,
+}: {
+  products: Product[];
+  value: string;
+  onSelect: (id: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const selected = products.find((p) => p.id === value) ?? null;
+  const q = query.trim().toLowerCase();
+  const matches = q
+    ? products
+        .filter((p) => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))
+        .slice(0, 8)
+    : [];
+
+  if (selected) {
+    return (
+      <div className="mt-2 flex min-h-[44px] items-center gap-2.5 rounded-sm border border-line bg-surface px-3 py-2">
+        <ProductThumb product={selected} size="sm" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm text-cream">{selected.name}</p>
+          <p className="tnum truncate text-xs text-dim">
+            central {centralOf(selected)} · recep. {selected.stock} · lav. {laundryOf(selected)}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            onSelect("");
+            setQuery("");
+          }}
+          className="shrink-0 text-xs uppercase tracking-[0.14em] text-dim transition-colors hover:text-gold"
+        >
+          Cambiar
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative mt-2">
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Escribe para buscar el producto…"
+        aria-label="Buscar producto"
+        className="min-h-[44px] w-full rounded-sm border border-line bg-surface px-3 py-2.5 text-sm text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none"
+      />
+      {q && (
+        <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto border border-line-strong bg-surface-2">
+          {matches.length === 0 ? (
+            <li className="px-3 py-3 text-sm text-dim">Sin coincidencias para “{query}”.</li>
+          ) : (
+            matches.map((p) => (
+              <li key={p.id} className="border-b border-line last:border-b-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelect(p.id);
+                    setQuery("");
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface"
+                >
+                  <ProductThumb product={p} size="sm" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-cream">{p.name}</span>
+                    <span className="tnum block truncate text-xs text-dim">
+                      central {centralOf(p)} · recep. {p.stock} · lav. {laundryOf(p)}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------ Modal de solicitud / traspaso */
 
 function TransferModal({
@@ -878,15 +1061,10 @@ function TransferModal({
             <div key={i} className="grid grid-cols-[1fr_84px_36px] items-end gap-2">
               <div className="min-w-0">
                 {i === 0 && <label className="kicker text-dim">Producto</label>}
-                <Select
+                <ProductPicker
+                  products={sorted}
                   value={it.productId}
-                  onValueChange={(v) => setItem(i, { productId: v, quantity: it.quantity || 12 })}
-                  placeholder="Elegir producto…"
-                  ariaLabel="Producto"
-                  options={sorted.map((p) => ({
-                    value: p.id,
-                    label: `${p.name} · central ${centralOf(p)} · recep. ${p.stock} · lav. ${laundryOf(p)}`,
-                  }))}
+                  onSelect={(id) => setItem(i, { productId: id, quantity: it.quantity || 12 })}
                 />
               </div>
               <div>

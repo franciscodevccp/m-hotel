@@ -69,6 +69,7 @@ export default function RoomServicePage() {
     roomService,
     rooms,
     products,
+    charges,
     addRoomServiceOrder,
     deliverRoomServiceOrder,
     cancelRoomServiceOrder,
@@ -107,17 +108,46 @@ export default function RoomServicePage() {
     });
   }
 
-  /** Imprime la comanda del pedido en la térmica (vía diálogo del sistema). */
+  /**
+   * Imprime la comanda del pedido en la térmica (vía diálogo del sistema).
+   * Además del pedido lleva las cortesías a preparar, el valor de la
+   * habitación y el total a cobrar al entregar la bandeja.
+   */
   function printOrder(o: RoomServiceOrder) {
+    const room = rooms.find((r) => r.id === o.roomId);
+    const pendingSum = charges
+      .filter((c) => c.roomId === o.roomId && c.status === "pendiente")
+      .reduce((s, c) => s + c.amount, 0);
+    const lines: TicketLine[] = [
+      ...orderLines(o),
+      // Cortesías pedidas por citófono: servicio las lleva junto con la bandeja.
+      ...(room?.courtesies ?? [])
+        .filter((c) => !c.opening)
+        .map((c) => ({ qty: c.quantity, name: c.label, amount: null })),
+    ];
+    if (room?.stay) {
+      lines.push(
+        pendingSum > 0
+          ? {
+              qty: 1,
+              name: `Habitación · bloque ${room.stay.duration} h (pendiente)`,
+              amount: pendingSum,
+            }
+          : { qty: 1, name: `Habitación · bloque ${room.stay.duration} h`, amount: null, tag: "Pagada" },
+      );
+    }
     const ok = printTicket(
       comandaHtml({
         room: o.roomId ? `Habitación ${roomNumber(o.roomId)}` : "Pedido online",
         at: formatDateTime(new Date(o.createdAt)),
         user: o.user,
-        lines: orderLines(o),
-        total: o.total,
+        lines,
+        total: o.total + pendingSum,
         notes: o.notes,
-        footer: "Preparar en cocina. El cobro queda asociado a la habitación.",
+        footer:
+          pendingSum > 0
+            ? "Preparar en cocina. Cobrar el total al entregar en la pieza."
+            : "Preparar en cocina. Habitación pagada: cobrar solo el pedido.",
       }),
       "Comanda room service",
     );
@@ -137,8 +167,9 @@ export default function RoomServicePage() {
           { qty: 2, name: "Cerveza Royal Guard 355 cc", amount: 6000 },
           { qty: 1, name: "Porción vaso espumante", amount: 3000 },
           { qty: 2, name: "Alkas", amount: null },
+          { qty: 1, name: "Habitación · bloque 6 h (pendiente)", amount: 90000 },
         ],
-        total: 13500,
+        total: 103500,
         notes: "Sin ají en la pizza.",
         footer:
           "Si este ticket salió completo, con corte y legible, la impresora térmica quedó reconocida.",

@@ -34,6 +34,17 @@ export interface Category {
 
 export type RoomStatus = "available" | "occupied" | "cleaning" | "maintenance";
 
+/** Cortesía cargada a una habitación (paquete de ingreso o pedida por citófono). */
+export interface RoomCourtesy {
+  id: string;
+  productId: string;
+  label: string;
+  quantity: number;
+  at: string; // ISO
+  /** true = parte del paquete de ingreso (se entrega al abrir la pieza). */
+  opening?: boolean;
+}
+
 /** Estancia en curso de una habitación ocupada (datos del check-in). */
 export interface RoomStay {
   dayType: DayType;
@@ -54,6 +65,12 @@ export interface Room {
   status: RoomStatus;
   occupiedUntil?: string; // ISO, si esta ocupada
   stay?: RoomStay; // datos de la estancia en curso (si hubo check-in)
+  /**
+   * Cortesías cargadas a la ocupación en curso (listado completo, editable).
+   * Vive en la habitación —no en la estadía— para funcionar también cuando
+   * la pieza se ocupó con cambio de estado manual, sin check-in.
+   */
+  courtesies?: RoomCourtesy[];
   cleaningAssignee?: string; // personal de aseo asignado (si esta en limpieza)
   cleaningStartedAt?: string; // ISO, cuando la mucama empezó la limpieza (en proceso)
   cleaningSince?: string; // ISO, cuando la habitación entró a limpieza (espera)

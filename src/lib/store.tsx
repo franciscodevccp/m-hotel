@@ -77,6 +77,7 @@ import type {
   RoomStatus,
   SalesChannel,
   Shift,
+  RoomCourtesy,
   ShopOrder,
   ShopSettings,
   StaffUser,
@@ -88,9 +89,10 @@ import type {
   Warehouse,
 } from "@/types";
 
-// v17: tercera bodega (lavandería/aseo), traspasos con entrega parcial y guía
-// de despacho, kit de aseo configurable y log de limpieza con checklist/observaciones.
-const STORAGE_KEY = "m-motel-state-v17";
+// v19: cortesías a nivel habitación (listado editable que acumula toques y
+// funciona sin check-in), cobro de la pieza sin liberar y comanda con valor
+// de habitación.
+const STORAGE_KEY = "m-motel-state-v19";
 
 /** Suma a ambas líneas del corte: lo registrado por el sistema es lo que debería
  * haber (deber) y, con el turno abierto, se asume que también está (real). La
@@ -105,6 +107,12 @@ const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   credit: "Tarjeta crédito",
   transfer: "Transferencia",
 };
+
+/** Strings "2× Alkas" del ticket de cobro: cortesías pedidas por citófono
+ * (las de apertura se entregan al abrir la pieza y no van en la comanda). */
+function courtesyStrings(courtesies: RoomCourtesy[] | undefined): string[] {
+  return (courtesies ?? []).filter((c) => !c.opening).map((c) => `${c.quantity}× ${c.label}`);
+}
 
 const ROOM_STATUS_LABEL: Record<RoomStatus, string> = {
   available: "Disponible",
@@ -276,7 +284,17 @@ interface AppStore extends AppState {
   /** Cambio de pieza: traslada la estancia en curso a otra habitación disponible. */
   moveRoom: (fromId: string, toId: string, actor?: Actor) => void;
   /** Registra una cortesía a la habitación (sin cobro): baja stock con rastro. */
-  logCourtesy: (roomId: string, productId: string, quantity: number, actor?: Actor) => void;
+  logCourtesy: (
+    roomId: string,
+    productId: string,
+    quantity: number,
+    actor?: Actor,
+    label?: string,
+  ) => void;
+  /** Anula una cortesía cargada por error: repone el stock y deja rastro. */
+  removeCourtesy: (roomId: string, entryId: string, actor?: Actor) => void;
+  /** Corrige la cantidad de una cortesía ya registrada (ajusta el stock por la diferencia). */
+  setCourtesyQuantity: (roomId: string, entryId: string, quantity: number, actor?: Actor) => void;
   /** Ampliar estancia: extiende el término y suma la hora adicional al total. */
   extendStay: (roomId: string, extraHours: number, actor?: Actor) => void;
   /** Cobra un ticket pendiente en la pieza: el pago entra al corte del turno. */
@@ -347,14 +365,15 @@ interface AppStore extends AppState {
     user?: string,
     actor?: Actor,
   ) => void;
-  /** Solicita reposición a bodega central (a recepción o a lavandería/aseo). */
+  /** Solicita reposición a bodega central (a recepción o a lavandería/aseo).
+   * Devuelve el id de la solicitud creada (para imprimir el vale al tiro). */
   requestTransfer: (
     items: TransferItem[],
     requestedBy: string,
     note?: string,
     actor?: Actor,
     to?: string,
-  ) => void;
+  ) => string;
   /** Encargado/Admin crea un traspaso directo ya entregado (cualquier dirección). */
   createDirectTransfer: (
     from: string,
@@ -587,6 +606,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
                     new Date(Date.now() + 3 * 60 * 60000).toISOString()
                   : undefined,
               stay: status === "occupied" ? room.stay : undefined,
+              courtesies: status === "occupied" ? room.courtesies : undefined,
               cleaningAssignee: status === "cleaning" ? room.cleaningAssignee : undefined,
               cleaningStartedAt: status === "cleaning" ? room.cleaningStartedAt : undefined,
               cleaningSince:
@@ -764,6 +784,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
                 status: "maintenance",
                 occupiedUntil: undefined,
                 stay: undefined,
+                courtesies: undefined,
                 cleaningSince: undefined,
                 cleaningStartedAt: undefined,
                 cleaningAssignee: undefined,
@@ -986,6 +1007,15 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
                     guestRut: guestRut?.trim() || undefined,
                     checkInAt: checkInAt.toISOString(),
                   },
+                  // El paquete de ingreso abre el listado de cortesías de la pieza.
+                  courtesies: openingPack.map((c, i) => ({
+                    id: `${makeId("sc")}-${i}`,
+                    productId: c.productId,
+                    label: c.label,
+                    quantity: c.quantity,
+                    at: checkInAt.toISOString(),
+                    opening: true,
+                  })),
                 }
               : r,
           ),
@@ -1013,44 +1043,150 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   );
 
   const logCourtesy = useCallback(
-    (roomId: string, productId: string, quantity: number, actor?: Actor) => {
+    (roomId: string, productId: string, quantity: number, actor?: Actor, label?: string) => {
       setState((prev) => {
         const room = prev.rooms.find((r) => r.id === roomId);
         const product = prev.products.find((p) => p.id === productId);
         if (!room || !product || quantity <= 0) return prev;
+        const now = new Date().toISOString();
         const movement: InventoryMovement = {
           id: makeId("m"),
           productId,
           type: "ajuste",
           quantity: -quantity,
-          at: new Date().toISOString(),
+          at: now,
           refId: `cortesia-${roomId}`,
           user: `Cortesía · Hab. ${room.number}`,
         };
-        // La cortesía pedida por citófono queda anotada en el ticket de la pieza,
-        // para que quien la prepara sepa qué llevar junto con el cobro.
-        const openCharge = prev.charges.find(
-          (c) => c.roomId === roomId && c.status === "pendiente",
+        // La cortesía queda en el listado de la pieza (visible y editable desde
+        // el tablero, con o sin check-in). Tocar de nuevo el mismo producto
+        // acumula la cantidad en una sola línea, no crea otra.
+        const existing = (room.courtesies ?? []).find(
+          (c) => !c.opening && c.productId === productId,
         );
+        const courtesies = existing
+          ? (room.courtesies ?? []).map((c) =>
+              c.id === existing.id ? { ...c, quantity: c.quantity + quantity, at: now } : c,
+            )
+          : [
+              ...(room.courtesies ?? []),
+              {
+                id: makeId("sc"),
+                productId,
+                label: label ?? product.name,
+                quantity,
+                at: now,
+              },
+            ];
         return {
           ...prev,
           products: prev.products.map((p) =>
             p.id === productId ? { ...p, stock: Math.max(0, p.stock - quantity) } : p,
           ),
           movements: [movement, ...prev.movements],
-          charges: openCharge
-            ? prev.charges.map((c) =>
-                c.id === openCharge.id
-                  ? { ...c, courtesies: [...c.courtesies, `${quantity}× ${product.name}`] }
-                  : c,
-              )
-            : prev.charges,
+          rooms: prev.rooms.map((r) => (r.id === roomId ? { ...r, courtesies } : r)),
+          charges: prev.charges.map((c) =>
+            c.roomId === roomId && c.status === "pendiente"
+              ? { ...c, courtesies: courtesyStrings(courtesies) }
+              : c,
+          ),
           audit: [
             auditEntry(
               "crear",
               "Registró una cortesía",
               "Cortesías",
               `Habitación ${room.number} · ${quantity}× ${product.name}`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
+  const removeCourtesy = useCallback((roomId: string, entryId: string, actor?: Actor) => {
+    setState((prev) => {
+      const room = prev.rooms.find((r) => r.id === roomId);
+      const entry = room?.courtesies?.find((c) => c.id === entryId);
+      if (!room || !entry) return prev;
+      const now = new Date().toISOString();
+      // La anulación repone el stock y deja su propio movimiento con rastro.
+      const movement: InventoryMovement = {
+        id: makeId("m"),
+        productId: entry.productId,
+        type: "ajuste",
+        quantity: entry.quantity,
+        at: now,
+        refId: `cortesia-anulada-${roomId}`,
+        user: `Cortesía anulada · Hab. ${room.number}`,
+      };
+      const courtesies = (room.courtesies ?? []).filter((c) => c.id !== entryId);
+      return {
+        ...prev,
+        products: prev.products.map((p) =>
+          p.id === entry.productId ? { ...p, stock: p.stock + entry.quantity } : p,
+        ),
+        movements: [movement, ...prev.movements],
+        rooms: prev.rooms.map((r) => (r.id === roomId ? { ...r, courtesies } : r)),
+        charges: prev.charges.map((c) =>
+          c.roomId === roomId && c.status === "pendiente"
+            ? { ...c, courtesies: courtesyStrings(courtesies) }
+            : c,
+        ),
+        audit: [
+          auditEntry(
+            "eliminar",
+            "Anuló una cortesía",
+            "Cortesías",
+            `Habitación ${room.number} · ${entry.quantity}× ${entry.label} · stock repuesto`,
+            actor,
+          ),
+          ...prev.audit,
+        ],
+      };
+    });
+  }, []);
+
+  const setCourtesyQuantity = useCallback(
+    (roomId: string, entryId: string, quantity: number, actor?: Actor) => {
+      setState((prev) => {
+        const room = prev.rooms.find((r) => r.id === roomId);
+        const entry = room?.courtesies?.find((c) => c.id === entryId);
+        if (!room || !entry || quantity <= 0 || quantity === entry.quantity) return prev;
+        const delta = quantity - entry.quantity; // + consume más stock, − repone
+        const now = new Date().toISOString();
+        const movement: InventoryMovement = {
+          id: makeId("m"),
+          productId: entry.productId,
+          type: "ajuste",
+          quantity: -delta,
+          at: now,
+          refId: `cortesia-${roomId}`,
+          user: `Cortesía corregida · Hab. ${room.number}`,
+        };
+        const courtesies = (room.courtesies ?? []).map((c) =>
+          c.id === entryId ? { ...c, quantity } : c,
+        );
+        return {
+          ...prev,
+          products: prev.products.map((p) =>
+            p.id === entry.productId ? { ...p, stock: Math.max(0, p.stock - delta) } : p,
+          ),
+          movements: [movement, ...prev.movements],
+          rooms: prev.rooms.map((r) => (r.id === roomId ? { ...r, courtesies } : r)),
+          charges: prev.charges.map((c) =>
+            c.roomId === roomId && c.status === "pendiente"
+              ? { ...c, courtesies: courtesyStrings(courtesies) }
+              : c,
+          ),
+          audit: [
+            auditEntry(
+              "editar",
+              "Corrigió una cortesía",
+              "Cortesías",
+              `Habitación ${room.number} · ${entry.label}: ${entry.quantity} → ${quantity}`,
               actor,
             ),
             ...prev.audit,
@@ -1238,6 +1374,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
                 status: "cleaning",
                 occupiedUntil: undefined,
                 stay: undefined,
+                courtesies: undefined,
                 cleaningSince: new Date().toISOString(),
                 cleaningStartedAt: undefined,
                 cleaningAssignee: undefined,
@@ -1266,10 +1403,18 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
               status: "cleaning",
               occupiedUntil: undefined,
               stay: undefined,
+              courtesies: undefined,
               cleaningSince: new Date().toISOString(),
             };
           if (r.id === toId)
-            return { ...r, status: "occupied", occupiedUntil: from.occupiedUntil, stay: from.stay };
+            return {
+              ...r,
+              status: "occupied",
+              occupiedUntil: from.occupiedUntil,
+              stay: from.stay,
+              // Las cortesías cargadas viajan con la estancia a la pieza nueva.
+              courtesies: from.courtesies,
+            };
           return r;
         }),
       };
@@ -1714,13 +1859,20 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestTransfer = useCallback(
-    (items: TransferItem[], requestedBy: string, note?: string, actor?: Actor, to?: string) => {
+    (
+      items: TransferItem[],
+      requestedBy: string,
+      note?: string,
+      actor?: Actor,
+      to?: string,
+    ): string => {
+      const id = makeId("tr");
       setState((prev) => {
         const clean = items.filter((it) => it.quantity > 0);
         if (clean.length === 0) return prev;
         const destination = to && to !== "central" ? to : "recepcion";
         const transfer: Transfer = {
-          id: makeId("tr"),
+          id,
           from: "central",
           to: destination,
           items: clean,
@@ -1745,6 +1897,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           ],
         };
       });
+      return id;
     },
     [],
   );
@@ -2161,6 +2314,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     checkOut,
     moveRoom,
     logCourtesy,
+    removeCourtesy,
+    setCourtesyQuantity,
     extendStay,
     payCharge,
     updateStayGuest,

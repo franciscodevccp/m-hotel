@@ -10,18 +10,22 @@ import { ImagePlaceholder } from "@/components/ui/ImagePlaceholder";
 import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { SegmentedToggle } from "@/components/ui/SegmentedToggle";
-import { DAY_LABELS, DURATION_LABELS, formatCLP, formatTime } from "@/lib/format";
+import { DAY_LABELS, DURATION_LABELS, formatCLP, formatDateTime, formatTime } from "@/lib/format";
 import { exampleIdentity } from "@/lib/idScan";
 import { DURATIONS, getCategory, isBlackLine, priceFor } from "@/lib/pricing";
+import { comandaHtml, printTicket, type TicketLine } from "@/lib/printTicket";
 import { formatRut, normalizeRut } from "@/lib/rut";
 import { useSession } from "@/lib/session";
 import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import type { DayType, Duration, PaymentMethod } from "@/types";
+import type { DayType, Duration, PaymentMethod, Room } from "@/types";
 import { RoomCell } from "./RoomCell";
 import { ROOM_STATUS, ROOM_STATUS_ORDER } from "./roomStatus";
 
-type View = "main" | "checkin" | "checkout" | "move";
+type View = "main" | "checkin" | "cobro" | "checkout" | "move";
+
+const POPUP_BLOCKED =
+  "El navegador bloqueó la ventana de impresión. Permite ventanas emergentes y vuelve a intentarlo.";
 
 function todayDayType(): DayType {
   const day = new Date().getDay();
@@ -62,6 +66,9 @@ export function RoomBoard() {
     moveRoom,
     extendStay,
     logCourtesy,
+    removeCourtesy,
+    setCourtesyQuantity,
+    payCharge,
   } = useAppStore();
   const { user, readOnly } = useSession();
   const actor = user ? { name: user.name, role: user.role } : undefined;
@@ -144,9 +151,65 @@ export function RoomBoard() {
     setCourtesyMsg(null);
   }
 
-  function quickCourtesy(roomId: string, item: CourtesyItem) {
-    logCourtesy(roomId, item.productId, item.quantity, actor);
-    setCourtesyMsg(`Registrada: ${item.quantity}× ${item.label}`);
+  /**
+   * Comanda de la pieza para servicio: cortesías a preparar, valor de la
+   * habitación y total a cobrar en la entrega. Se imprime a demanda con el
+   * botón del listado (no por cada toque), cuando ya está todo cargado.
+   */
+  function printRoomComanda(room: Room) {
+    const pendingSum = charges
+      .filter((c) => c.roomId === room.id && c.status === "pendiente")
+      .reduce((s, c) => s + c.amount, 0);
+    const lines: TicketLine[] = (room.courtesies ?? [])
+      .filter((c) => !c.opening)
+      .map((c) => ({ qty: c.quantity, name: c.label, amount: null }));
+    if (room.stay) {
+      lines.push(
+        pendingSum > 0
+          ? { qty: 1, name: `Habitación · bloque ${room.stay.duration} h (pendiente)`, amount: pendingSum }
+          : { qty: 1, name: `Habitación · bloque ${room.stay.duration} h`, amount: null, tag: "Pagada" },
+      );
+    }
+    return printTicket(
+      comandaHtml({
+        banner: "CORTESÍAS DE LA PIEZA",
+        room: `Habitación ${room.number}`,
+        at: formatDateTime(new Date()),
+        user: userLabel ?? "Recepción",
+        lines,
+        total: pendingSum,
+        footer:
+          pendingSum > 0
+            ? "Preparar y llevar. Cobrar el total al entregar en la pieza."
+            : "Preparar y llevar. Habitación pagada: nada por cobrar.",
+      }),
+      "Comanda de cortesías",
+    );
+  }
+
+  function quickCourtesy(room: Room, item: CourtesyItem) {
+    logCourtesy(room.id, item.productId, item.quantity, actor, item.label);
+    // El aviso refleja el acumulado: tocar de nuevo suma, no reemplaza. La
+    // comanda se imprime una sola vez, con el botón, cuando ya está todo cargado.
+    const previous = (room.courtesies ?? [])
+      .filter((c) => !c.opening && c.productId === item.productId)
+      .reduce((s, c) => s + c.quantity, 0);
+    const count =
+      (room.courtesies ?? []).filter((c) => !c.opening && c.productId !== item.productId).length + 1;
+    setCourtesyMsg(
+      `Registrada: ${previous + item.quantity}× ${item.label} · ${count} cortesía${count === 1 ? "" : "s"} pedida${count === 1 ? "" : "s"} en la pieza`,
+    );
+  }
+
+  /** Cobra todos los tickets pendientes de la pieza sin liberarla. */
+  function payRoom(room: Room, method: PaymentMethod) {
+    charges
+      .filter((c) => c.roomId === room.id && c.status === "pendiente")
+      .forEach((c) => payCharge(c.id, method, userLabel, actor));
+    setCourtesyMsg(
+      `Cobro registrado (${PAY_METHODS.find((m) => m.value === method)?.label.toLowerCase()}). La habitación sigue ocupada.`,
+    );
+    setView("main");
   }
 
   /** Respaldo del lector: rellena con una identidad de ejemplo (demo sin carnet). */
@@ -285,10 +348,88 @@ export function RoomBoard() {
                 </Button>
               )}
 
+              {/* Cortesías cargadas: listado completo de la ocupación, editable */}
+              {current.status === "occupied" && (current.courtesies?.length ?? 0) > 0 && (
+                <div>
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="kicker text-dim">Cortesías cargadas</p>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!printRoomComanda(current)) setCourtesyMsg(POPUP_BLOCKED);
+                        }}
+                        className="text-xs uppercase tracking-[0.14em] text-dim transition-colors hover:text-gold"
+                      >
+                        Imprimir comanda
+                      </button>
+                    )}
+                  </div>
+                  <ul className="mt-2 divide-y divide-line border border-line bg-surface/40">
+                    {(current.courtesies ?? []).map((c) => (
+                      <li key={c.id} className="flex items-center gap-2 px-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-cream">
+                            <span className="tnum text-gold">{c.quantity}×</span> {c.label}
+                          </p>
+                          <p className="text-xs text-dim">
+                            {c.opening ? "Paquete de ingreso" : "Cortesía"} ·{" "}
+                            {formatTime(new Date(c.at))}
+                          </p>
+                        </div>
+                        {!readOnly && (
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setCourtesyQuantity(current.id, c.id, c.quantity - 1, actor)}
+                              disabled={c.quantity <= 1}
+                              aria-label={`Quitar una unidad de ${c.label}`}
+                              className="flex size-8 items-center justify-center border border-line text-base text-muted transition-colors hover:border-gold/70 hover:text-gold disabled:pointer-events-none disabled:opacity-30"
+                            >
+                              −
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCourtesyQuantity(current.id, c.id, c.quantity + 1, actor)}
+                              aria-label={`Agregar una unidad de ${c.label}`}
+                              className="flex size-8 items-center justify-center border border-line text-base text-muted transition-colors hover:border-gold/70 hover:text-gold"
+                            >
+                              +
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                removeCourtesy(current.id, c.id, actor);
+                                setCourtesyMsg(`Anulada: ${c.quantity}× ${c.label}. Stock repuesto.`);
+                              }}
+                              aria-label={`Anular ${c.label}`}
+                              className="ml-1 flex size-8 items-center justify-center border border-line text-base text-dim transition-colors hover:border-busy/60 hover:text-busy"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1.5 text-xs leading-relaxed text-dim">
+                    Anular repone el stock; toda corrección queda en auditoría.
+                  </p>
+                </div>
+              )}
+
               {!readOnly && current.status === "occupied" && (
                 <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button onClick={() => setView("checkout")}>Check-out</Button>
+                  <div className={cn("grid gap-2", currentPendingSum > 0 ? "grid-cols-3" : "grid-cols-2")}>
+                    {currentPendingSum > 0 && (
+                      <Button onClick={() => setView("cobro")}>Cobrar</Button>
+                    )}
+                    <Button
+                      variant={currentPendingSum > 0 ? "secondary" : "primary"}
+                      onClick={() => setView("checkout")}
+                    >
+                      Liberar habitación
+                    </Button>
                     <Button variant="secondary" onClick={() => setView("move")}>
                       Cambiar de pieza
                     </Button>
@@ -352,7 +493,8 @@ export function RoomBoard() {
               <aside className="mt-6 border-t border-line pt-5 sm:mt-0 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
                 <p className="kicker text-gold">Cortesías · un toque</p>
                 <p className={cn("mt-2 min-h-4 text-xs", courtesyMsg ? "text-ok" : "text-dim")}>
-                  {courtesyMsg ?? "Quedan registradas al toque, sin cobro."}
+                  {courtesyMsg ??
+                    "Quedan registradas al toque, sin cobro. Cuando esté todo cargado, imprime la comanda desde el listado."}
                 </p>
                 <div className="mt-3 space-y-4">
                   {COURTESY_MENU.map((group) => (
@@ -363,7 +505,7 @@ export function RoomBoard() {
                           <button
                             key={item.productId}
                             type="button"
-                            onClick={() => quickCourtesy(current.id, item)}
+                            onClick={() => quickCourtesy(current, item)}
                             className="border border-line px-2.5 py-2 text-left text-xs text-muted transition-colors hover:border-gold/70 hover:text-gold"
                           >
                             {item.label}
@@ -488,7 +630,56 @@ export function RoomBoard() {
             </div>
           )}
 
-          {/* ---- Check-out ---- */}
+          {/* ---- Cobro en recepción: paga el bloque sin liberar la pieza ---- */}
+          {view === "cobro" && (
+            <div className="space-y-5">
+              <div className="flex items-baseline justify-between border-b border-line pb-4">
+                <span className="kicker text-dim">Total a cobrar</span>
+                <span className="tnum font-display text-2xl text-gold">
+                  {formatCLP(currentPendingSum)}
+                </span>
+              </div>
+              <div>
+                <span className="kicker text-dim">Medio de pago</span>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {PAY_METHODS.map((m) => (
+                    <button
+                      key={m.value}
+                      type="button"
+                      onClick={() => setPayMethod(m.value)}
+                      className={cn(
+                        "border px-3 py-2.5 text-sm transition-colors",
+                        payMethod === m.value
+                          ? "border-gold/70 text-gold"
+                          : "border-line text-muted hover:border-line-strong hover:text-cream",
+                      )}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs leading-relaxed text-dim">
+                El pago entra al corte del turno y la habitación sigue ocupada hasta que el
+                huésped se retire (Liberar habitación).
+              </p>
+              <div className="flex gap-3">
+                <Button variant="ghost" onClick={() => setView("main")}>
+                  Volver
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    if (payMethod !== "none") payRoom(current, payMethod);
+                  }}
+                >
+                  Confirmar cobro
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* ---- Liberar habitación (el huésped se retira) ---- */}
           {view === "checkout" && (
             <div className="space-y-5">
               {currentPendingSum > 0 ? (
@@ -546,7 +737,7 @@ export function RoomBoard() {
                     </span>
                   </div>
                   <p className="mt-3 text-xs leading-relaxed text-dim">
-                    Sin saldo pendiente: el bloque se cobró al inicio. La habitación pasa a
+                    Sin saldo pendiente: el cobro ya se registró. La habitación pasa a
                     limpieza.
                   </p>
                 </div>
@@ -567,7 +758,7 @@ export function RoomBoard() {
                     close();
                   }}
                 >
-                  Confirmar check-out
+                  Liberar habitación
                 </Button>
               </div>
             </div>

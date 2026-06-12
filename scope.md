@@ -58,6 +58,7 @@ Todo simulado en memoria, funcional dentro de la demo:
 **Bodegas (`/admin/bodegas`)**
 - **Tres bodegas**: recepción, central (bajo llave) y lavandería/aseo.
 - Traspasos con **guía interna de despacho** (folio correlativo, imprimible en térmica 80 mm): producto, solicitado, entregado, **pendiente**, quién solicita / entrega / recibe, fecha y hora.
+- **Vale de solicitud impreso**: al enviar la solicitud sale solo un vale con casillas para marcar y espacio para anotar lo entregado a mano — el papel que el bodeguero lleva a la bodega central (allá no hay computador). La guía definitiva también sale sola al registrar la entrega, y ambas se reimprimen desde cada tarjeta del historial.
 - **Control de stock insuficiente**: si lo solicitado supera el saldo, el sistema alerta, permite **entrega parcial**, registra el pendiente y lo suma a la **sugerencia de reposición** (con acceso directo a compras).
 - **Semáforo de stock** en tiempo real, por bodega: verde normal · amarillo bajo · rojo crítico · gris sin stock.
 
@@ -66,6 +67,12 @@ Todo simulado en memoria, funcional dentro de la demo:
 
 **Tablero (`/admin/habitaciones`)**
 - La celda ocupada muestra la marca **"Por cobrar"** mientras el ticket de la pieza siga pendiente; desaparece cuando la camarera registra el pago.
+- **Cobrar sin liberar** (flujo del cliente): el botón **Cobrar** registra el pago del bloque y la habitación sigue ocupada; **Liberar habitación** (ex check-out) se usa recién cuando el huésped se retira, cobrando ahí solo el saldo que quede.
+- **Cortesías de la estadía**: al abrir una pieza ocupada se ve el **listado completo** de cortesías cargadas (paquete de ingreso + pedidas por citófono), con hora. Se puede **corregir la cantidad o anular** una cortesía cargada por error: el stock se repone y la corrección queda en auditoría.
+- Las cortesías se cargan al toque y se acumulan (tocar de nuevo suma en la misma línea); la **comanda hacia servicio se imprime una sola vez con el botón del listado**, con las cortesías a preparar, el **valor de la habitación** y el **total a cobrar** en la entrega. La comanda de room service sí sale sola al tomar el pedido y lleva lo mismo: pedido + cortesías + habitación (pendiente suma al total; pagada queda marcada).
+
+**Reposición (`/admin/bodegas`)**
+- El producto se elige con un **buscador de filtrado en vivo**: se escriben las primeras letras y la lista muestra solo coincidencias (nombre o código), con miniatura y saldos por bodega.
 
 ---
 
