@@ -5,9 +5,11 @@ import { IdScanModal } from "@/components/admin/IdScanModal";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { SegmentedToggle } from "@/components/ui/SegmentedToggle";
-import { cleaningChecklistFor, cleaningKitFor } from "@/data/cleaning";
+import { cleaningChecklistFor } from "@/data/cleaning";
+import { SEED_GUESTS } from "@/data/guests";
 import { formatCLP, formatTime } from "@/lib/format";
 import { exampleIdentity } from "@/lib/idScan";
+import { photoToDataUrl } from "@/lib/photo";
 import { getCategory } from "@/lib/pricing";
 import { normalizeRut } from "@/lib/rut";
 import { RoomQrScanModal } from "@/components/admin/RoomQrScanModal";
@@ -49,6 +51,60 @@ function EmptyState({ text }: { text: string }) {
     <div className="border border-line bg-surface/40 px-6 py-16 text-center">
       <p className="font-display text-2xl text-cream">{text}</p>
     </div>
+  );
+}
+
+/** Adjuntar fotografía (cámara o galería): vista previa y quitar. */
+function PhotoField({
+  photo,
+  onPhoto,
+  label = "Adjuntar fotografía",
+}: {
+  photo: string | null;
+  onPhoto: (dataUrl: string | null) => void;
+  label?: string;
+}) {
+  if (photo) {
+    return (
+      <div className="flex items-center gap-3 border border-line bg-surface/40 p-3">
+        {/* eslint-disable-next-line @next/next/no-img-element -- foto local de la demo */}
+        <img
+          src={photo}
+          alt="Fotografía adjunta"
+          className="size-14 shrink-0 rounded-xs border border-line object-cover"
+        />
+        <span className="min-w-0 flex-1 text-sm text-muted">Fotografía adjunta</span>
+        <button
+          type="button"
+          onClick={() => onPhoto(null)}
+          className="shrink-0 text-xs uppercase tracking-[0.14em] text-dim transition-colors hover:text-busy"
+        >
+          Quitar
+        </button>
+      </div>
+    );
+  }
+  return (
+    <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-3 border border-dashed border-line px-4 py-3 transition-colors hover:border-gold/60">
+      <span className="text-sm text-muted">{label}</span>
+      <span className="kicker text-dim">Cámara o galería</span>
+      <input
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file) return;
+          try {
+            onPhoto(await photoToDataUrl(file));
+          } catch {
+            onPhoto(null);
+          }
+        }}
+      />
+    </label>
   );
 }
 
@@ -110,6 +166,7 @@ export default function AseoPage() {
   const {
     rooms,
     cleaningLog,
+    cleaningKits,
     charges,
     blacklist,
     startCleaning,
@@ -123,14 +180,17 @@ export default function AseoPage() {
   const [tab, setTab] = useState<Tab>("pendientes");
   const [reporting, setReporting] = useState<Room | null>(null);
   const [note, setNote] = useState("");
+  const [reportPhoto, setReportPhoto] = useState<string | null>(null);
   // Cobro en pieza: ticket seleccionado y método de pago elegido.
   const [paying, setPaying] = useState<RoomCharge | null>(null);
   const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
   // Registro del huésped desde la pieza (escaneo de cédula de la camarera).
   const [scanningRoom, setScanningRoom] = useState<Room | null>(null);
-  // Checklist obligatorio antes de marcar la pieza lista.
+  // Checklist obligatorio antes de marcar la pieza lista (+ observación con foto).
   const [finishing, setFinishing] = useState<Room | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [finishNote, setFinishNote] = useState("");
+  const [finishPhoto, setFinishPhoto] = useState<string | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- siembra la hora actual al montar (cronómetros en vivo)
@@ -155,27 +215,39 @@ export default function AseoPage() {
     const room = rooms.find((r) => r.id === paying.roomId);
     setQrMsg({
       tone: "ok",
-      text: `Cobro registrado: ${formatCLP(paying.amount)} en la habitación ${room?.number ?? paying.roomId} (${PAY_METHODS.find((m) => m.value === payMethod)?.label.toLowerCase()}). Entró al corte del turno.`,
+      text: `Cobro registrado: ${formatCLP(paying.amount)} en la habitación ${room?.number ?? paying.roomId} (${PAY_METHODS.find((m) => m.value === payMethod)?.label.toLowerCase()}). Entró al corte del turno. Ahora escanea la cédula del huésped.`,
     });
     setPaying(null);
     setPayMethod("cash");
+    // Flujo del cliente: cobro → escaneo de carnet → sincronización con
+    // recepción. El escáner se abre solo como paso siguiente.
+    if (room) setScanningRoom(room);
   }
 
-  /** El escaneo de la camarera registra al huésped y consulta la lista negra. */
+  /**
+   * El escaneo de la camarera registra al huésped y consulta de inmediato la
+   * lista negra y el historial (cliente bloqueado, restringido o frecuente).
+   */
   function handleGuestScan(name: string, rut: string) {
     if (!scanningRoom) return;
     updateStayGuest(scanningRoom.id, name, rut, actor);
-    const match = blacklist.find((b) => b.rut && normalizeRut(b.rut) === normalizeRut(rut));
+    const blocked = blacklist.find((b) => b.rut && normalizeRut(b.rut) === normalizeRut(rut));
+    const known = SEED_GUESTS.find((g) => g.rut && normalizeRut(g.rut) === normalizeRut(rut));
     setQrMsg(
-      match
+      blocked
         ? {
             tone: "busy",
-            text: `Alerta: ${match.name} está en la lista negra (${match.reason}). Avisa a recepción antes de continuar.`,
+            text: `Alerta: ${blocked.name} está en la lista negra (${blocked.reason}). Avisa a recepción antes de continuar.`,
           }
-        : {
-            tone: "ok",
-            text: `Huésped registrado en la habitación ${scanningRoom.number}: ${name || "sin nombre"} · ${rut}. Recepción ya lo ve en el tablero.`,
-          },
+        : known && (known.tags.includes("vip") || known.tags.includes("frecuente"))
+          ? {
+              tone: "ok",
+              text: `Cliente ${known.tags.includes("vip") ? "VIP" : "frecuente"}: ${known.name} (${known.visits} visitas). Registrado en la habitación ${scanningRoom.number}; recepción ya lo ve en el tablero.`,
+            }
+          : {
+              tone: "ok",
+              text: `Huésped registrado en la habitación ${scanningRoom.number}: ${name || "sin nombre"} · ${rut}. Recepción ya lo ve en el tablero.`,
+            },
     );
     setScanningRoom(null);
   }
@@ -356,11 +428,14 @@ export default function AseoPage() {
               onStart={() => startCleaning(room.id, by)}
               onFinish={() => {
                 setChecked(new Set());
+                setFinishNote("");
+                setFinishPhoto(null);
                 setFinishing(room);
               }}
               onReport={() => {
                 setReporting(room);
                 setNote("");
+                setReportPhoto(null);
               }}
             />
           ))
@@ -385,20 +460,18 @@ export default function AseoPage() {
               placeholder="Ej: ampolleta quemada, llave del jacuzzi gotea"
               className="min-h-[88px] w-full resize-none rounded-sm border border-line bg-surface px-3 py-2.5 text-sm text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none"
             />
-            <button
-              type="button"
-              disabled
-              className="flex w-full items-baseline justify-between border border-dashed border-line px-4 py-3 text-left opacity-70"
-            >
-              <span className="text-sm text-muted">Adjuntar fotografía del problema</span>
-              <span className="kicker text-dim">Próximamente</span>
-            </button>
+            <PhotoField
+              photo={reportPhoto}
+              onPhoto={setReportPhoto}
+              label="Adjuntar fotografía del problema"
+            />
             <Button
               size="lg"
               className="w-full"
               onClick={() => {
-                reportMaintenance(reporting.id, note, by, actor);
+                reportMaintenance(reporting.id, note, by, actor, reportPhoto ?? undefined);
                 setReporting(null);
+                setReportPhoto(null);
               }}
             >
               Reportar mantención
@@ -447,20 +520,41 @@ export default function AseoPage() {
             </div>
             <p className="text-xs leading-relaxed text-dim">
               Insumos de esta categoría:{" "}
-              {cleaningKitFor(finishing.categoryId)
-                .map((k) => k.label)
-                .join(" · ")}
-              .
+              {(cleaningKits[finishing.categoryId] ?? []).map((k) => k.label).join(" · ")}.
             </p>
+            <div className="space-y-3 border-t border-line pt-4">
+              <label className="kicker text-dim" htmlFor="finish-note">
+                Observación (opcional)
+              </label>
+              <textarea
+                id="finish-note"
+                value={finishNote}
+                onChange={(e) => setFinishNote(e.target.value)}
+                rows={2}
+                placeholder="Ej: mancha en alfombra, falta un vaso, daño menor"
+                className="min-h-[64px] w-full resize-none rounded-sm border border-line bg-surface px-3 py-2.5 text-sm text-cream placeholder:text-dim focus:border-gold/60 focus-visible:outline-none"
+              />
+              {(finishNote.trim() || finishPhoto) && (
+                <PhotoField
+                  photo={finishPhoto}
+                  onPhoto={setFinishPhoto}
+                  label="Adjuntar fotografía de la observación"
+                />
+              )}
+            </div>
             <Button
               size="lg"
               className="w-full"
               disabled={checked.size < cleaningChecklistFor(finishing.categoryId).length}
               onClick={() => {
-                finishCleaning(finishing.id, actor);
+                finishCleaning(finishing.id, actor, {
+                  checklist: true,
+                  note: finishNote,
+                  photo: finishPhoto ?? undefined,
+                });
                 setQrMsg({
                   tone: "ok",
-                  text: `Habitación ${finishing.number} lista: checklist completo e insumos descontados del inventario.`,
+                  text: `Habitación ${finishing.number} lista: checklist completo e insumos descontados del inventario.${finishNote.trim() ? " La observación quedó en el historial." : ""}`,
                 });
                 setFinishing(null);
               }}

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { StockBadge, stockLevel } from "@/components/admin/StockBadge";
 import { StockReportButton } from "@/components/admin/StockReportButton";
 import { Button } from "@/components/ui/Button";
+import { ProductThumb } from "@/components/ui/ProductThumb";
 import { Modal } from "@/components/ui/Modal";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { Select } from "@/components/ui/Select";
@@ -372,24 +373,27 @@ export default function InventarioPage() {
               key={p.id}
               className="grid grid-cols-1 gap-2 border-b border-line px-5 py-4 last:border-b-0 lg:grid-cols-[minmax(0,2fr)_96px_124px_84px_132px] lg:gap-0 xl:grid-cols-[minmax(0,2fr)_minmax(0,0.7fr)_112px_140px_100px_156px]"
             >
-              <div className="min-w-0 lg:flex lg:flex-col lg:justify-center lg:pr-4">
-                <p className="flex items-center gap-2 truncate text-sm text-cream">
-                  <span className="truncate">{p.name}</span>
-                  {p.ageRestricted && (
-                    <span className="shrink-0 rounded-xs border border-wine/60 px-1.5 py-px text-[0.625rem] font-medium tracking-[0.06em] text-wine-soft">
-                      +18
-                    </span>
-                  )}
-                </p>
-                <p className="truncate text-xs text-dim">
-                  {p.group ? `${p.group} · ` : ""}
-                  {p.channels.length > 0
-                    ? p.channels.map((c) => CHANNEL_LABELS[c]).join(" · ")
-                    : "Uso interno"}
-                  {!isSupplies && (PRODUCT_SALES_30D[p.id] ?? 0) === 0 && p.active && (
-                    <span className="text-dim"> · Sin ventas 30 d</span>
-                  )}
-                </p>
+              <div className="flex min-w-0 items-center gap-3 lg:pr-4">
+                <ProductThumb product={p} />
+                <div className="min-w-0">
+                  <p className="flex items-center gap-2 truncate text-sm text-cream">
+                    <span className="truncate">{p.name}</span>
+                    {p.ageRestricted && (
+                      <span className="shrink-0 rounded-xs border border-wine/60 px-1.5 py-px text-[0.625rem] font-medium tracking-[0.06em] text-wine-soft">
+                        +18
+                      </span>
+                    )}
+                  </p>
+                  <p className="truncate text-xs text-dim">
+                    {p.group ? `${p.group} · ` : ""}
+                    {p.channels.length > 0
+                      ? p.channels.map((c) => CHANNEL_LABELS[c]).join(" · ")
+                      : "Uso interno"}
+                    {!isSupplies && (PRODUCT_SALES_30D[p.id] ?? 0) === 0 && p.active && (
+                      <span className="text-dim"> · Sin ventas 30 d</span>
+                    )}
+                  </p>
+                </div>
               </div>
 
               <div className="hidden min-w-0 xl:flex xl:items-center xl:self-stretch xl:border-l xl:border-line xl:px-4">

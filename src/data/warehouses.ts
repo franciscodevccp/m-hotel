@@ -1,10 +1,12 @@
 import type { Warehouse } from "@/types";
 
-// Las dos bodegas reales de la operación: la de recepción (venta diaria) y la
-// central (bajo llave). Los traspasos digitales mueven stock entre ambas.
+// Las tres bodegas reales de la operación: recepción (venta diaria), central
+// (bajo llave) y lavandería/aseo (insumos de las camareras). Los traspasos
+// digitales mueven stock entre ellas con guía interna de despacho.
 export const WAREHOUSES: Warehouse[] = [
   { id: "recepcion", name: "Bodega de recepción", locked: false },
   { id: "central", name: "Bodega central", locked: true },
+  { id: "lavanderia", name: "Bodega lavandería y aseo", locked: false },
 ];
 
 export function warehouseName(id: string): string {

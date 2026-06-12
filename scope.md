@@ -44,6 +44,29 @@ Alcance cerrado. Lo que no está acá, no se construye (se deja como placeholder
 **Reportes (`/admin/reportes`)** *(opcional, si alcanza)*
 - 2–3 gráficos mock: ocupación e ingresos por día/categoría. Datos estáticos.
 
+### Módulos operativos (observaciones del cliente, jun-2026)
+
+Todo simulado en memoria, funcional dentro de la demo:
+
+**Aseo (`/admin/aseo`) y Limpieza (`/admin/limpieza`)**
+- Cada aseo registra camarera, hora de inicio, hora de término y duración. La presencia se valida escaneando el QR instalado en la pieza.
+- Checklist obligatorio antes de marcar la pieza lista (jacuzzi solo donde corresponde), con observación e **incidencias con fotografía** (cámara o galería del dispositivo).
+- Reportes para administración: historial por camarera y **por habitación**, tiempo promedio, pendientes, **habitaciones observadas**, **productividad por turno (día/noche)** y **cumplimiento de checklist**.
+- **Consumo automático de insumos**: cada limpieza descuenta el kit de su categoría desde la bodega de lavandería, en fracciones del formato de compra (0,1 de bidón). La medición es **editable por administración** por categoría.
+- Cobro del bloque en la pieza (flujo del cliente): cobro → medio de pago → **escaneo de carnet** → sincronización con recepción. El escaneo alerta lista negra y reconoce clientes frecuentes/VIP.
+
+**Bodegas (`/admin/bodegas`)**
+- **Tres bodegas**: recepción, central (bajo llave) y lavandería/aseo.
+- Traspasos con **guía interna de despacho** (folio correlativo, imprimible en térmica 80 mm): producto, solicitado, entregado, **pendiente**, quién solicita / entrega / recibe, fecha y hora.
+- **Control de stock insuficiente**: si lo solicitado supera el saldo, el sistema alerta, permite **entrega parcial**, registra el pendiente y lo suma a la **sugerencia de reposición** (con acceso directo a compras).
+- **Semáforo de stock** en tiempo real, por bodega: verde normal · amarillo bajo · rojo crítico · gris sin stock.
+
+**Inventario (`/admin/inventario`)**
+- Miniaturas de producto (fotografía si existe; monograma sobrio si no) y el mismo semáforo de cuatro niveles.
+
+**Tablero (`/admin/habitaciones`)**
+- La celda ocupada muestra la marca **"Por cobrar"** mientras el ticket de la pieza siga pendiente; desaparece cuando la camarera registra el pago.
+
 ---
 
 ## 2. Flujo de reserva (público)

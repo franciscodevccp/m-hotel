@@ -12,7 +12,7 @@ import { CATEGORIES } from "@/data/categories";
 import { SEED_ANOMALIES } from "@/data/anomalies";
 import { SEED_AUDIT } from "@/data/audit";
 import { SEED_BRANCHES } from "@/data/branches";
-import { cleaningKitFor, SEED_CLEANING_LOG } from "@/data/cleaning";
+import { SEED_CLEANING_KITS, SEED_CLEANING_LOG } from "@/data/cleaning";
 import { SEED_CHARGES } from "@/data/charges";
 import { SEED_COUPONS } from "@/data/coupons";
 import { openingPackFor } from "@/data/courtesies";
@@ -26,7 +26,7 @@ import { SEED_RESERVATIONS } from "@/data/reservations";
 import { SEED_ROOM_SERVICE } from "@/data/roomService";
 import { SEED_SHOP_ORDERS } from "@/data/shopOrders";
 import { SEED_STOCK_COUNTS } from "@/data/stockCounts";
-import { SEED_TRANSFERS } from "@/data/transfers";
+import { nextGuideFolio, SEED_TRANSFERS } from "@/data/transfers";
 import { WAREHOUSES, warehouseName } from "@/data/warehouses";
 import { DEFAULT_SHOP_SETTINGS } from "@/data/shopSettings";
 import { ROOMS, SEED_OCCUPIED_MINUTES } from "@/data/rooms";
@@ -35,6 +35,7 @@ import { SEED_EXPENSES, SEED_SHIFT, SEED_TRANSACTIONS } from "@/data/shifts";
 import { shiftItems } from "@/lib/cash";
 import { formatCLP } from "@/lib/format";
 import { makeId } from "@/lib/id";
+import { stockOf, withStock } from "@/lib/inventory";
 import { extraHourFor, priceFor } from "@/lib/pricing";
 import { SHOP_NEXT } from "@/lib/shop";
 import type {
@@ -47,7 +48,10 @@ import type {
   CashLine,
   Cuadratura,
   Category,
+  CategoryId,
   ClosedShift,
+  CleaningKitItem,
+  CleaningKits,
   CleaningLogEntry,
   Coupon,
   DayType,
@@ -84,9 +88,9 @@ import type {
   Warehouse,
 } from "@/types";
 
-// v16: cobro en pieza (tickets de la camarera), cuadraturas parciales, arqueo
-// con débito/crédito/transferencia, colores operacionales y lista negra con RUT.
-const STORAGE_KEY = "m-motel-state-v16";
+// v17: tercera bodega (lavandería/aseo), traspasos con entrega parcial y guía
+// de despacho, kit de aseo configurable y log de limpieza con checklist/observaciones.
+const STORAGE_KEY = "m-motel-state-v17";
 
 /** Suma a ambas líneas del corte: lo registrado por el sistema es lo que debería
  * haber (deber) y, con el turno abierto, se asume que también está (real). La
@@ -158,6 +162,8 @@ interface AppState {
   blacklist: BlacklistEntry[];
   maintenanceReports: MaintenanceReport[];
   cleaningLog: CleaningLogEntry[];
+  /** Kit de insumos por categoría (medición editable por administración). */
+  cleaningKits: CleaningKits;
   shopOrders: ShopOrder[];
   coupons: Coupon[];
   shopSettings: ShopSettings;
@@ -174,14 +180,18 @@ interface AppState {
 }
 
 /**
- * Mueve los ítems de un traspaso entre bodegas. Si el origen no alcanza para
- * una línea, la cantidad se recorta al saldo disponible (regla de maqueta) y
- * queda anotado. Devuelve los productos actualizados y lo realmente movido.
+ * Mueve los ítems de un traspaso entre bodegas (recepción, central o
+ * lavandería). La cantidad a entregar por línea puede venir explícita
+ * (entrega parcial decidida por quien entrega); si no, se entrega lo
+ * solicitado recortado al saldo disponible. Devuelve los productos
+ * actualizados, los ítems con su entregado y las líneas con faltante.
  */
 function applyTransferToProducts(
   products: Product[],
   items: TransferItem[],
   from: string,
+  to: string,
+  quantities?: Record<string, number>,
 ): { products: Product[]; moved: TransferItem[]; shortages: string[] } {
   const byId = new Map(products.map((p) => [p.id, p]));
   const moved: TransferItem[] = [];
@@ -189,20 +199,20 @@ function applyTransferToProducts(
   for (const item of items) {
     const product = byId.get(item.productId);
     if (!product || item.quantity <= 0) continue;
-    const available = from === "central" ? (product.centralStock ?? 0) : product.stock;
-    const quantity = Math.min(item.quantity, Math.max(0, available));
-    moved.push({ productId: item.productId, quantity });
-    if (quantity < item.quantity) {
-      shortages.push(`${product.name} (${quantity} de ${item.quantity})`);
+    const available = Math.max(0, stockOf(product, from));
+    const wanted = Math.max(0, quantities?.[item.productId] ?? item.quantity);
+    const delivered = Math.min(wanted, available, item.quantity);
+    moved.push({ productId: item.productId, quantity: item.quantity, delivered });
+    if (delivered < item.quantity) {
+      shortages.push(`${product.name} (${delivered} de ${item.quantity})`);
     }
   }
-  const movedById = new Map(moved.map((m) => [m.productId, m.quantity]));
+  const movedById = new Map(moved.map((m) => [m.productId, m.delivered ?? 0]));
   const updated = products.map((p) => {
     const quantity = movedById.get(p.id);
     if (!quantity) return p;
-    return from === "central"
-      ? { ...p, centralStock: (p.centralStock ?? 0) - quantity, stock: p.stock + quantity }
-      : { ...p, stock: p.stock - quantity, centralStock: (p.centralStock ?? 0) + quantity };
+    const out = withStock(p, from, stockOf(p, from) - quantity);
+    return withStock(out, to, stockOf(out, to) + quantity);
   });
   return { products: updated, moved, shortages };
 }
@@ -219,9 +229,21 @@ interface AppStore extends AppState {
   /** Aseo empieza la limpieza de una habitación (queda "en proceso"). */
   startCleaning: (roomId: string, by?: string, actor?: Actor) => void;
   /** Aseo marca la habitación lista: pasa a disponible y registra la limpieza. */
-  finishCleaning: (roomId: string, actor?: Actor) => void;
+  finishCleaning: (
+    roomId: string,
+    actor?: Actor,
+    opts?: { checklist?: boolean; note?: string; photo?: string },
+  ) => void;
   /** Aseo reporta mantención: la habitación pasa a mantención y deja una incidencia. */
-  reportMaintenance: (roomId: string, note?: string, by?: string, actor?: Actor) => void;
+  reportMaintenance: (
+    roomId: string,
+    note?: string,
+    by?: string,
+    actor?: Actor,
+    photo?: string,
+  ) => void;
+  /** Ajusta la medición del kit de insumos de una categoría (administración). */
+  updateCleaningKit: (categoryId: CategoryId, items: CleaningKitItem[], actor?: Actor) => void;
   /** Registra una anomalía/incidente del turno. */
   addAnomaly: (anomaly: Anomaly, actor?: Actor) => void;
   /** Marca una anomalía como resuelta. */
@@ -325,8 +347,14 @@ interface AppStore extends AppState {
     user?: string,
     actor?: Actor,
   ) => void;
-  /** Recepción solicita reposición a bodega central (central → recepción). */
-  requestTransfer: (items: TransferItem[], requestedBy: string, note?: string, actor?: Actor) => void;
+  /** Solicita reposición a bodega central (a recepción o a lavandería/aseo). */
+  requestTransfer: (
+    items: TransferItem[],
+    requestedBy: string,
+    note?: string,
+    actor?: Actor,
+    to?: string,
+  ) => void;
   /** Encargado/Admin crea un traspaso directo ya entregado (cualquier dirección). */
   createDirectTransfer: (
     from: string,
@@ -335,8 +363,17 @@ interface AppStore extends AppState {
     deliveredBy: string,
     actor?: Actor,
   ) => void;
-  /** Entrega una solicitud pendiente: mueve el stock y registra los movimientos. */
-  deliverTransfer: (id: string, deliveredBy: string, actor?: Actor) => void;
+  /**
+   * Entrega una solicitud pendiente: mueve el stock y registra los movimientos.
+   * `quantities` permite la entrega parcial (cantidad por producto decidida por
+   * quien entrega cuando el saldo no alcanza); el saldo queda pendiente.
+   */
+  deliverTransfer: (
+    id: string,
+    deliveredBy: string,
+    actor?: Actor,
+    quantities?: Record<string, number>,
+  ) => void;
   /** Recepción confirma que recibió conforme (cierra el ciclo, no mueve stock). */
   receiveTransfer: (id: string, receivedBy: string, actor?: Actor) => void;
   /** Rechaza una solicitud pendiente con motivo (no mueve stock). */
@@ -384,6 +421,7 @@ function seedState(): AppState {
     blacklist: SEED_BLACKLIST,
     maintenanceReports: [],
     cleaningLog: SEED_CLEANING_LOG,
+    cleaningKits: SEED_CLEANING_KITS,
     shopOrders: SEED_SHOP_ORDERS,
     coupons: SEED_COUPONS,
     shopSettings: DEFAULT_SHOP_SETTINGS,
@@ -456,6 +494,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           blacklist: parsed.blacklist ?? prev.blacklist,
           maintenanceReports: parsed.maintenanceReports ?? prev.maintenanceReports,
           cleaningLog: parsed.cleaningLog ?? prev.cleaningLog,
+          cleaningKits: parsed.cleaningKits ?? prev.cleaningKits,
           shopOrders: parsed.shopOrders ?? prev.shopOrders,
           coupons: parsed.coupons ?? prev.coupons,
           shopSettings: parsed.shopSettings ?? prev.shopSettings,
@@ -596,72 +635,123 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const finishCleaning = useCallback((roomId: string, actor?: Actor) => {
-    setState((prev) => {
-      const room = prev.rooms.find((r) => r.id === roomId);
-      if (!room) return prev;
-      const minutes = room.cleaningStartedAt
-        ? Math.max(0, Math.round((Date.now() - new Date(room.cleaningStartedAt).getTime()) / 60000))
-        : undefined;
-      const now = new Date().toISOString();
-      const entry: CleaningLogEntry = {
-        id: makeId("cl"),
-        roomId,
-        by: room.cleaningAssignee,
-        at: now,
-        minutes,
-      };
-      // El aseo descuenta solo los insumos según la medición de su categoría.
-      const kit = cleaningKitFor(room.categoryId);
-      const kitMovements: InventoryMovement[] = kit.map((k, i) => ({
-        id: `${makeId("m")}-a${i}`,
-        productId: k.productId,
-        type: "ajuste",
-        quantity: -k.quantity,
-        at: now,
-        refId: `aseo-${roomId}`,
-        user: `Insumos de aseo · Hab. ${room.number}`,
-      }));
-      const kitById = new Map(kit.map((k) => [k.productId, k.quantity]));
-      return {
+  const finishCleaning = useCallback(
+    (
+      roomId: string,
+      actor?: Actor,
+      opts?: { checklist?: boolean; note?: string; photo?: string },
+    ) => {
+      setState((prev) => {
+        const room = prev.rooms.find((r) => r.id === roomId);
+        if (!room) return prev;
+        const minutes = room.cleaningStartedAt
+          ? Math.max(
+              0,
+              Math.round((Date.now() - new Date(room.cleaningStartedAt).getTime()) / 60000),
+            )
+          : undefined;
+        const now = new Date().toISOString();
+        const entry: CleaningLogEntry = {
+          id: makeId("cl"),
+          roomId,
+          by: room.cleaningAssignee,
+          startedAt: room.cleaningStartedAt,
+          at: now,
+          minutes,
+          checklist: opts?.checklist ?? true,
+          note: opts?.note?.trim() || undefined,
+          photo: opts?.photo,
+        };
+        // El aseo descuenta solo los insumos (medición vigente de la categoría,
+        // editable por administración) desde la bodega de lavandería/aseo.
+        const kit = prev.cleaningKits[room.categoryId] ?? [];
+        const kitMovements: InventoryMovement[] = kit.map((k, i) => ({
+          id: `${makeId("m")}-a${i}`,
+          productId: k.productId,
+          type: "ajuste",
+          quantity: -k.quantity,
+          at: now,
+          refId: `aseo-${roomId}`,
+          user: `Insumos de aseo · Hab. ${room.number}`,
+        }));
+        const kitById = new Map(kit.map((k) => [k.productId, k.quantity]));
+        return {
+          ...prev,
+          rooms: prev.rooms.map((r) =>
+            r.id === roomId
+              ? {
+                  ...r,
+                  status: "available",
+                  cleaningSince: undefined,
+                  cleaningStartedAt: undefined,
+                  cleaningAssignee: undefined,
+                }
+              : r,
+          ),
+          products: prev.products.map((p) => {
+            const qty = kitById.get(p.id);
+            return qty
+              ? {
+                  ...p,
+                  laundryStock: Math.max(
+                    0,
+                    Math.round(((p.laundryStock ?? 0) - qty) * 10) / 10,
+                  ),
+                }
+              : p;
+          }),
+          movements: [...kitMovements, ...prev.movements],
+          cleaningLog: [entry, ...prev.cleaningLog],
+          audit: [
+            auditEntry(
+              "estado",
+              "Terminó una limpieza",
+              "Limpieza",
+              `Habitación ${room.number}${minutes != null ? ` · ${minutes} min` : ""} · ${
+                entry.checklist ? "checklist completo" : "checklist incompleto"
+              }${entry.note ? " · con observación" : ""} · insumos descontados`,
+              actor ??
+                (room.cleaningAssignee ? { name: room.cleaningAssignee, role: "aseo" } : undefined),
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
+
+  const updateCleaningKit = useCallback(
+    (categoryId: CategoryId, items: CleaningKitItem[], actor?: Actor) => {
+      setState((prev) => ({
         ...prev,
-        rooms: prev.rooms.map((r) =>
-          r.id === roomId
-            ? {
-                ...r,
-                status: "available",
-                cleaningSince: undefined,
-                cleaningStartedAt: undefined,
-                cleaningAssignee: undefined,
-              }
-            : r,
-        ),
-        products: prev.products.map((p) => {
-          const qty = kitById.get(p.id);
-          return qty ? { ...p, stock: Math.max(0, Math.round((p.stock - qty) * 10) / 10) } : p;
-        }),
-        movements: [...kitMovements, ...prev.movements],
-        cleaningLog: [entry, ...prev.cleaningLog],
+        cleaningKits: {
+          ...prev.cleaningKits,
+          [categoryId]: items.filter((i) => i.productId && i.quantity > 0),
+        },
         audit: [
           auditEntry(
-            "estado",
-            "Terminó una limpieza",
+            "editar",
+            "Ajustó el kit de insumos de aseo",
             "Limpieza",
-            `Habitación ${room.number}${minutes != null ? ` · ${minutes} min` : ""} · checklist completo · insumos descontados`,
-            actor ?? (room.cleaningAssignee ? { name: room.cleaningAssignee, role: "aseo" } : undefined),
+            `Categoría ${prev.categories.find((c) => c.id === categoryId)?.name ?? categoryId}`,
+            actor,
           ),
           ...prev.audit,
         ],
-      };
-    });
-  }, []);
+      }));
+    },
+    [],
+  );
 
-  const reportMaintenance = useCallback((roomId: string, note?: string, by?: string, actor?: Actor) => {
+  const reportMaintenance = useCallback(
+    (roomId: string, note?: string, by?: string, actor?: Actor, photo?: string) => {
     setState((prev) => {
       const report: MaintenanceReport = {
         id: makeId("mr"),
         roomId,
         note: note?.trim() || undefined,
+        photo,
         at: new Date().toISOString(),
         by,
       };
@@ -1624,14 +1714,15 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestTransfer = useCallback(
-    (items: TransferItem[], requestedBy: string, note?: string, actor?: Actor) => {
+    (items: TransferItem[], requestedBy: string, note?: string, actor?: Actor, to?: string) => {
       setState((prev) => {
         const clean = items.filter((it) => it.quantity > 0);
         if (clean.length === 0) return prev;
+        const destination = to && to !== "central" ? to : "recepcion";
         const transfer: Transfer = {
           id: makeId("tr"),
           from: "central",
-          to: "recepcion",
+          to: destination,
           items: clean,
           status: "solicitado",
           requestedBy,
@@ -1647,7 +1738,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
               "crear",
               "Solicitó reposición a bodega central",
               "Bodegas",
-              `${clean.length} producto${clean.length === 1 ? "" : "s"} · central → recepción`,
+              `${clean.length} producto${clean.length === 1 ? "" : "s"} · central → ${warehouseName(destination).toLowerCase()}`,
               actor,
             ),
             ...prev.audit,
@@ -1668,29 +1759,32 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           prev.products,
           clean,
           from,
+          to,
         );
+        const partial = moved.some((m) => (m.delivered ?? 0) < m.quantity);
         const transfer: Transfer = {
           id: makeId("tr"),
+          folio: nextGuideFolio(prev.transfers),
           from,
           to,
           items: moved,
-          status: "entregado",
+          status: partial ? "parcial" : "entregado",
           requestedBy: deliveredBy,
           deliveredBy,
           note: shortages.length
-            ? `Cantidades recortadas al saldo disponible: ${shortages.join(", ")}.`
+            ? `Entrega parcial por stock insuficiente: ${shortages.join(", ")}. El saldo queda pendiente.`
             : undefined,
           createdAt: now,
           deliveredAt: now,
           branchId: "limache",
         };
         const movements: InventoryMovement[] = moved
-          .filter((m) => m.quantity > 0)
+          .filter((m) => (m.delivered ?? 0) > 0)
           .map((m, i) => ({
             id: `${makeId("m")}-${i}`,
             productId: m.productId,
             type: "traspaso",
-            quantity: m.quantity,
+            quantity: m.delivered ?? 0,
             at: now,
             refId: transfer.id,
             user: deliveredBy,
@@ -1716,57 +1810,79 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const deliverTransfer = useCallback((id: string, deliveredBy: string, actor?: Actor) => {
-    setState((prev) => {
-      const transfer = prev.transfers.find((t) => t.id === id);
-      if (!transfer || transfer.status !== "solicitado") return prev;
-      const now = new Date().toISOString();
-      const { products, moved, shortages } = applyTransferToProducts(
-        prev.products,
-        transfer.items,
-        transfer.from,
-      );
-      const movements: InventoryMovement[] = moved
-        .filter((m) => m.quantity > 0)
-        .map((m, i) => ({
-          id: `${makeId("m")}-${i}`,
-          productId: m.productId,
-          type: "traspaso",
-          quantity: m.quantity,
-          at: now,
-          refId: transfer.id,
-          user: deliveredBy,
-        }));
-      const note = shortages.length
-        ? `${transfer.note ? `${transfer.note} ` : ""}Cantidades recortadas al saldo disponible: ${shortages.join(", ")}.`
-        : transfer.note;
-      return {
-        ...prev,
-        products,
-        movements: [...movements, ...prev.movements],
-        transfers: prev.transfers.map((t) =>
-          t.id === id
-            ? { ...t, status: "entregado", deliveredBy, deliveredAt: now, items: moved, note }
-            : t,
-        ),
-        audit: [
-          auditEntry(
-            "estado",
-            "Entregó una solicitud de bodega",
-            "Bodegas",
-            `Solicitud ${transfer.id} · ${moved.length} producto${moved.length === 1 ? "" : "s"} · ${warehouseName(transfer.from)} → ${warehouseName(transfer.to)}`,
-            actor,
+  const deliverTransfer = useCallback(
+    (id: string, deliveredBy: string, actor?: Actor, quantities?: Record<string, number>) => {
+      setState((prev) => {
+        const transfer = prev.transfers.find((t) => t.id === id);
+        if (!transfer || transfer.status !== "solicitado") return prev;
+        const now = new Date().toISOString();
+        const { products, moved, shortages } = applyTransferToProducts(
+          prev.products,
+          transfer.items,
+          transfer.from,
+          transfer.to,
+          quantities,
+        );
+        const movements: InventoryMovement[] = moved
+          .filter((m) => (m.delivered ?? 0) > 0)
+          .map((m, i) => ({
+            id: `${makeId("m")}-${i}`,
+            productId: m.productId,
+            type: "traspaso",
+            quantity: m.delivered ?? 0,
+            at: now,
+            refId: transfer.id,
+            user: deliveredBy,
+          }));
+        // Si alguna línea quedó corta, la entrega es parcial: el saldo queda
+        // pendiente en la guía y alimenta la sugerencia de reposición.
+        const partial = moved.some((m) => (m.delivered ?? 0) < m.quantity);
+        const note = shortages.length
+          ? `${transfer.note ? `${transfer.note} ` : ""}Entrega parcial por stock insuficiente: ${shortages.join(", ")}. El saldo queda pendiente.`
+          : transfer.note;
+        const folio = nextGuideFolio(prev.transfers);
+        return {
+          ...prev,
+          products,
+          movements: [...movements, ...prev.movements],
+          transfers: prev.transfers.map((t) =>
+            t.id === id
+              ? {
+                  ...t,
+                  status: partial ? "parcial" : "entregado",
+                  folio,
+                  deliveredBy,
+                  deliveredAt: now,
+                  items: moved,
+                  note,
+                }
+              : t,
           ),
-          ...prev.audit,
-        ],
-      };
-    });
-  }, []);
+          audit: [
+            auditEntry(
+              "estado",
+              partial
+                ? "Entregó una solicitud de bodega (parcial)"
+                : "Entregó una solicitud de bodega",
+              "Bodegas",
+              `Guía ${folio} · ${moved.length} producto${moved.length === 1 ? "" : "s"} · ${warehouseName(transfer.from)} → ${warehouseName(transfer.to)}${partial ? " · saldo pendiente" : ""}`,
+              actor,
+            ),
+            ...prev.audit,
+          ],
+        };
+      });
+    },
+    [],
+  );
 
   const receiveTransfer = useCallback((id: string, receivedBy: string, actor?: Actor) => {
     setState((prev) => {
       const transfer = prev.transfers.find((t) => t.id === id);
-      if (!transfer || transfer.status !== "entregado") return prev;
+      // La entrega parcial también se confirma: el saldo pendiente queda en la
+      // guía y en la sugerencia de reposición.
+      if (!transfer || (transfer.status !== "entregado" && transfer.status !== "parcial"))
+        return prev;
       return {
         ...prev,
         transfers: prev.transfers.map((t) =>
@@ -1825,7 +1941,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           warehouseId,
           group,
           lines: scopeProducts.map((p) => {
-            const expected = warehouseId === "central" ? (p.centralStock ?? 0) : p.stock;
+            const expected = stockOf(p, warehouseId);
             // Las líneas parten cuadradas: en el conteo solo se editan las difieren.
             return { productId: p.id, expected, counted: expected };
           }),
@@ -1886,9 +2002,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
             const line = byId.get(p.id);
             if (!line) return p;
             const delta = line.counted - line.expected;
-            return count.warehouseId === "central"
-              ? { ...p, centralStock: Math.max(0, (p.centralStock ?? 0) + delta) }
-              : { ...p, stock: Math.max(0, p.stock + delta) };
+            return withStock(
+              p,
+              count.warehouseId,
+              Math.max(0, stockOf(p, count.warehouseId) + delta),
+            );
           });
           const adjustments: InventoryMovement[] = diffs.map((l, i) => ({
             id: `${makeId("m")}-${i}`,
@@ -2028,6 +2146,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     assignCleaning,
     startCleaning,
     finishCleaning,
+    updateCleaningKit,
     reportMaintenance,
     addAnomaly,
     resolveAnomaly,

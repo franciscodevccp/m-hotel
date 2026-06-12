@@ -32,10 +32,12 @@ const CATEGORY_BADGE: Record<CategoryId, string> = {
 interface RoomCellProps {
   room: Room;
   now: number | null;
+  /** true si la estadía tiene un ticket de cobro pendiente en la pieza. */
+  pendingCharge?: boolean;
   onSelect: (room: Room) => void;
 }
 
-export function RoomCell({ room, now, onSelect }: RoomCellProps) {
+export function RoomCell({ room, now, pendingCharge, onSelect }: RoomCellProps) {
   const status = ROOM_STATUS[room.status];
   const category = getCategory(room.categoryId);
   const minutes = minutesLeft(room, now);
@@ -67,13 +69,20 @@ export function RoomCell({ room, now, onSelect }: RoomCellProps) {
 
       <p className={cn("text-sm font-medium", status.fg)}>{status.label}</p>
 
-      <span
-        className={cn(
-          "self-start rounded-xs border px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-[0.1em]",
-          CATEGORY_BADGE[room.categoryId],
+      <span className="flex flex-wrap items-center gap-1.5">
+        <span
+          className={cn(
+            "rounded-xs border px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-[0.1em]",
+            CATEGORY_BADGE[room.categoryId],
+          )}
+        >
+          {category.shortName}
+        </span>
+        {room.status === "occupied" && pendingCharge && (
+          <span className="rounded-xs border border-busy/60 bg-busy/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-busy">
+            Por cobrar
+          </span>
         )}
-      >
-        {category.shortName}
       </span>
 
       <p className="tnum min-h-4 text-xs">

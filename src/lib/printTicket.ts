@@ -61,6 +61,65 @@ export function comandaHtml(data: ComandaData): string {
   `;
 }
 
+/** Línea de la guía de despacho: solicitado vs entregado por producto. */
+export interface GuiaLine {
+  name: string;
+  requested: number;
+  delivered: number;
+}
+
+export interface GuiaData {
+  folio: number;
+  from: string; // nombre de bodega de origen
+  to: string; // nombre de bodega de destino
+  at: string; // fecha/hora de entrega, ya formateada
+  requestedBy: string;
+  deliveredBy: string;
+  receivedBy?: string;
+  lines: GuiaLine[];
+  note?: string;
+}
+
+/** HTML interno de la guía interna de despacho (cuerpo, sin <html>). */
+export function guiaHtml(data: GuiaData): string {
+  const pendingTotal = data.lines.reduce((s, l) => s + Math.max(0, l.requested - l.delivered), 0);
+  const lines = data.lines
+    .map((l) => {
+      const pending = Math.max(0, l.requested - l.delivered);
+      return `
+      <div class="row"><span class="name">${esc(l.name)}</span></div>
+      <div class="row cols">
+        <span>Solicitado ${l.requested}</span>
+        <span>Entregado ${l.delivered}</span>
+        <span>${pending > 0 ? `Pendiente ${pending}` : "Completo"}</span>
+      </div>`;
+    })
+    .join('<div class="sep-soft"></div>');
+
+  return `
+    <div class="center">
+      <p class="brand">M MOTEL</p>
+      <p>Av. Palmira Romano Sur 196-A · Limache</p>
+      <p class="big">GUÍA INTERNA DE DESPACHO</p>
+      <p class="banner">FOLIO N° ${data.folio}</p>
+    </div>
+    <div class="sep"></div>
+    <div class="row"><span>${esc(data.from)}</span><span>&rarr;</span><span>${esc(data.to)}</span></div>
+    <p>Entrega: ${esc(data.at)}</p>
+    <div class="sep"></div>
+    ${lines}
+    <div class="sep"></div>
+    <div class="row total"><span>SALDO PENDIENTE</span><span>${pendingTotal > 0 ? `${pendingTotal} un.` : "—"}</span></div>
+    <div class="sep"></div>
+    <p>Solicita: ${esc(data.requestedBy)}</p>
+    <p>Entrega: ${esc(data.deliveredBy)}</p>
+    <p>Recibe: ${data.receivedBy ? esc(data.receivedBy) : "________________________"}</p>
+    ${data.note ? `<div class="sep"></div><p>Nota: ${esc(data.note)}</p>` : ""}
+    <div class="sep"></div>
+    <p class="center">Documento interno de control de bodegas.</p>
+  `;
+}
+
 const TICKET_CSS = `
   @page { size: 80mm auto; margin: 0; }
   * { box-sizing: border-box; }
@@ -78,7 +137,9 @@ const TICKET_CSS = `
   .big { margin-top: 6px; font-size: 14px; font-weight: 700; }
   .banner { margin-top: 4px; padding: 2px 0; border: 1px solid #000; font-weight: 700; }
   .sep { margin: 6px 0; border-top: 1px dashed #000; }
+  .sep-soft { margin: 4px 0; }
   .row { display: flex; justify-content: space-between; gap: 8px; }
+  .row.cols { gap: 4px; font-size: 11px; }
   .row .name { min-width: 0; }
   .row .amt { flex-shrink: 0; }
   .total { font-size: 14px; font-weight: 700; }

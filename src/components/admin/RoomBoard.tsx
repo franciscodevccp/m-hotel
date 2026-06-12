@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { COURTESY_MENU, openingPackFor, type CourtesyItem } from "@/data/courtesies";
+import { SEED_GUESTS } from "@/data/guests";
 import { IdScanModal } from "@/components/admin/IdScanModal";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
@@ -91,11 +92,26 @@ export function RoomBoard() {
   // Con la pieza ocupada, el modal crece y las cortesías quedan a la vista al costado.
   const courtesySidebar = Boolean(current && current.status === "occupied" && !readOnly);
 
-  // Consulta automática contra la lista negra al escanear o escribir el RUT.
-  const blMatch =
-    guestRut.replace(/[^0-9kK]/g, "").length >= 7
-      ? blacklist.find((b) => b.rut && normalizeRut(b.rut) === normalizeRut(guestRut))
+  // Consulta automática contra la lista negra y el historial de huéspedes al
+  // escanear o escribir el RUT (bloqueado, restringido o frecuente).
+  const rutReady = guestRut.replace(/[^0-9kK]/g, "").length >= 7;
+  const blMatch = rutReady
+    ? blacklist.find((b) => b.rut && normalizeRut(b.rut) === normalizeRut(guestRut))
+    : undefined;
+  const guestMatch =
+    rutReady && !blMatch
+      ? SEED_GUESTS.find(
+          (g) =>
+            g.rut &&
+            normalizeRut(g.rut) === normalizeRut(guestRut) &&
+            (g.tags.includes("vip") || g.tags.includes("frecuente")),
+        )
       : undefined;
+
+  // Habitaciones con ticket de cobro pendiente: la marca "Por cobrar" del tablero.
+  const pendingByRoom = new Set(
+    charges.filter((c) => c.status === "pendiente").map((c) => c.roomId),
+  );
 
   // Cobro en pieza de la habitación abierta: lo pendiente lo cobra la camarera.
   const currentPending = current
@@ -175,7 +191,13 @@ export function RoomBoard() {
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
           {filtered.map((room) => (
-            <RoomCell key={room.id} room={room} now={now} onSelect={(r) => open(r.id)} />
+            <RoomCell
+              key={room.id}
+              room={room}
+              now={now}
+              pendingCharge={pendingByRoom.has(room.id)}
+              onSelect={(r) => open(r.id)}
+            />
           ))}
         </div>
       )}
@@ -427,6 +449,17 @@ export function RoomBoard() {
                     <p className="mt-1 text-xs leading-relaxed text-muted">
                       {blMatch.name} · {blMatch.reason} Confirma con jefatura antes de
                       continuar con el ingreso.
+                    </p>
+                  </div>
+                )}
+                {guestMatch && (
+                  <div className="mt-3 border border-gold/50 bg-gold/10 px-4 py-3">
+                    <p className="text-sm font-medium text-gold">
+                      Cliente {guestMatch.tags.includes("vip") ? "VIP" : "frecuente"}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted">
+                      {guestMatch.name} · {guestMatch.visits} visitas registradas.
+                      {guestMatch.notes ? ` ${guestMatch.notes}` : ""}
                     </p>
                   </div>
                 )}

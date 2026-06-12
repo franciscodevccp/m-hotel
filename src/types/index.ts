@@ -199,6 +199,7 @@ export interface Product {
   cost?: number; // costo unitario (opcional, para margen)
   stock: number; // unidades en bodega de recepción (el stock operativo de venta)
   centralStock?: number; // unidades en bodega central (bajo llave); undefined = 0
+  laundryStock?: number; // unidades en bodega de lavandería/aseo; undefined = 0
   lowStockThreshold: number; // umbral para alerta de stock bajo
   channels: SalesChannel[]; // donde se vende
   ageRestricted: boolean; // +18 (sexshop)
@@ -379,6 +380,7 @@ export interface MaintenanceReport {
   id: string;
   roomId: string;
   note?: string;
+  photo?: string; // dataURL de la fotografía adjunta (daños o faltantes)
   at: string; // ISO
   by?: string;
 }
@@ -388,9 +390,24 @@ export interface CleaningLogEntry {
   id: string;
   roomId: string;
   by?: string;
-  at: string; // ISO
+  startedAt?: string; // ISO, hora de inicio del aseo
+  at: string; // ISO, hora de término
   minutes?: number; // cuánto tomó la limpieza (desde que se empezó)
+  checklist?: boolean; // true = checklist completo al cerrar
+  note?: string; // observación de la camarera (incidencia, faltante, daño)
+  photo?: string; // dataURL de la fotografía adjunta a la observación
 }
+
+/** Ítem del kit de insumos de aseo: producto real y consumo por limpieza. */
+export interface CleaningKitItem {
+  productId: string;
+  label: string;
+  /** Consumo estimado por aseo, en unidades del inventario (admite fracción de bidón). */
+  quantity: number;
+}
+
+/** Kit de aseo por categoría, configurable por administración. */
+export type CleaningKits = Record<CategoryId, CleaningKitItem[]>;
 
 // --- Tienda online (e-commerce del sexshop) ---
 
@@ -562,21 +579,27 @@ export interface Warehouse {
   locked: boolean;
 }
 
-export type TransferStatus = "solicitado" | "entregado" | "recibido" | "rechazado";
+export type TransferStatus = "solicitado" | "parcial" | "entregado" | "recibido" | "rechazado";
 
 export interface TransferItem {
   productId: string;
+  /** Cantidad solicitada. */
   quantity: number;
+  /** Cantidad efectivamente entregada (si difiere, el saldo queda pendiente). */
+  delivered?: number;
 }
 
 /**
  * Traspaso entre bodegas. Una solicitud de reposición es un traspaso en estado
- * "solicitado" creado desde recepción; el stock se mueve al entregarse.
+ * "solicitado"; el stock se mueve al entregarse. Cada entrega genera una guía
+ * interna de despacho (folio correlativo) imprimible desde el historial.
  */
 export interface Transfer {
   id: string;
+  /** Folio de la guía interna de despacho (se asigna al entregar). */
+  folio?: number;
   from: string; // warehouseId origen (central, normalmente)
-  to: string; // warehouseId destino (recepción, normalmente)
+  to: string; // warehouseId destino (recepción o lavandería)
   items: TransferItem[];
   status: TransferStatus;
   requestedBy: string; // quién solicita (jefe de turno)

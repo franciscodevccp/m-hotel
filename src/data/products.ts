@@ -101,12 +101,19 @@ const RECEPTION_OVERRIDES: Record<string, number> = {
   "7804676070113": 3, // Preservativos variedades
 };
 
+// Los insumos de estos grupos operan desde la bodega de lavandería/aseo:
+// el saldo a mano de las camareras vive ahí y el grueso queda en central.
+const LAUNDRY_GROUPS = new Set(["Aseo", "Lavandería"]);
+const LAUNDRY_CAP = 6;
+
 export const SEED_PRODUCTS: Product[] = SORTED_INVENTORY.map((item) => {
   // Los saldos negativos del sistema anterior se cargan en 0; el detalle queda
   // como movimiento de regularización (ver SEED_MOVEMENTS).
   const total = Math.max(0, item.total);
+  const inLaundry = item.family === "insumo" && LAUNDRY_GROUPS.has(item.group);
   const cap = item.family === "insumo" ? RECEPTION_CAP_INSUMO : RECEPTION_CAP_VENTA;
-  const stock = Math.min(total, RECEPTION_OVERRIDES[item.barcode] ?? cap);
+  const stock = inLaundry ? 0 : Math.min(total, RECEPTION_OVERRIDES[item.barcode] ?? cap);
+  const laundryStock = inLaundry ? Math.min(total, LAUNDRY_CAP) : 0;
   return {
     id: `p-${item.barcode}`,
     sku: item.barcode,
@@ -116,7 +123,8 @@ export const SEED_PRODUCTS: Product[] = SORTED_INVENTORY.map((item) => {
     price: item.price,
     cost: item.cost,
     stock,
-    centralStock: total - stock,
+    centralStock: total - stock - laundryStock,
+    laundryStock,
     lowStockThreshold: thresholdFor(item),
     channels: item.channels,
     ageRestricted: item.ageRestricted ?? false,
